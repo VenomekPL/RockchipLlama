@@ -15,21 +15,25 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 
 ## Project Status
 
-🔧 **Phase 3 In Progress** - RKLLM NPU integration (model loads but outputs garbage)
+🔧 **Phase 3 In Progress** - RKLLM NPU integration + accurate benchmarking
 
 **Completed:**
 - ✅ FastAPI server with OpenAI API compatibility
 - ✅ Model management system (load/unload/list)
-- ✅ Comprehensive benchmarking suite
+- ✅ Comprehensive benchmarking suite with streaming
 - ✅ Real RKLLM ctypes bindings implemented
 - ✅ Model successfully loads on NPU (RKLLM 1.2.1 + driver 0.9.7)
 - ✅ GPU acceleration + 4-thread big core optimization
+- ✅ **Fixed**: Accurate performance metrics from RKLLM perf stats
+  - Real TTFT (prefill time)
+  - Separate input/output token speeds
+  - NPU memory usage tracking
 
-**Current Issues:**
+**Known Issues:**
 - ❌ NPU generates text but output is incoherent/off-topic
-- ❌ Token counting incorrect (not using RKLLM perf stats)
-- ❌ Prompt handling needs investigation
-- 🔄 Need to extract RKLLMPerfStat from callback for accurate metrics
+  - Hypothesis: Models need chat templates and system prompts
+  - Deferred: Will implement with prompt caching later
+- 🔄 Need to test with proper prompt formatting
 
 ## Repository Structure
 

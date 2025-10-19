@@ -162,7 +162,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
         current_model = await ensure_model_loaded(preferred_model=request.model)
         
         # Non-streaming response - use loaded model
-        generated_text = current_model.generate(
+        generated_text, perf_stats = current_model.generate(
             prompt=prompt,
             max_new_tokens=request.max_tokens or 512,
             temperature=request.temperature or 0.8,
@@ -170,6 +170,13 @@ async def create_chat_completion(request: ChatCompletionRequest):
             top_k=request.top_k or 20,  # User preference: 20
             repeat_penalty=getattr(request, 'repeat_penalty', None) or 1.1
         )
+        
+        # Log performance stats if available
+        if perf_stats:
+            logger.info(f"Performance: TTFT={perf_stats.get('prefill_time_ms', 0):.1f}ms, "
+                       f"Gen={perf_stats.get('generate_time_ms', 0):.1f}ms, "
+                       f"Tokens={perf_stats.get('generate_tokens', 0)}, "
+                       f"Speed={perf_stats.get('generate_tokens', 0) / (perf_stats.get('generate_time_ms', 1) / 1000):.1f} tok/s")
         
         # Create response
         response = ChatCompletionResponse(
@@ -243,7 +250,7 @@ async def stream_chat_completion(
             return
         
         # Generate with streaming (this will fill chunk_buffer via callback)
-        current_model.generate(
+        _, perf_stats = current_model.generate(
             prompt=prompt,
             max_new_tokens=request.max_tokens or 512,
             temperature=request.temperature or 0.8,
@@ -257,7 +264,23 @@ async def stream_chat_completion(
         for chunk in chunk_buffer:
             yield f"data: {chunk.model_dump_json()}\n\n"
         
-        # Send final chunk with finish_reason
+        # Send final chunk with finish_reason and perf stats
+        usage_data = {
+            "prompt_tokens": len(prompt.split()),
+            "completion_tokens": len(generated_text.split()),
+            "total_tokens": len(prompt.split()) + len(generated_text.split())
+        }
+        
+        # Add RKLLM perf stats if available
+        if perf_stats:
+            usage_data.update({
+                "prefill_time_ms": perf_stats.get('prefill_time_ms', 0),
+                "prefill_tokens": perf_stats.get('prefill_tokens', 0),
+                "generate_time_ms": perf_stats.get('generate_time_ms', 0),
+                "generate_tokens": perf_stats.get('generate_tokens', 0),
+                "memory_usage_mb": perf_stats.get('memory_usage_mb', 0)
+            })
+        
         final_chunk = ChatCompletionChunk(
             id=completion_id,
             created=created_time,
@@ -267,11 +290,7 @@ async def stream_chat_completion(
                 "delta": {},
                 "finish_reason": "stop"
             }],
-            usage={
-                "prompt_tokens": len(prompt.split()),
-                "completion_tokens": len(generated_text.split()),
-                "total_tokens": len(prompt.split()) + len(generated_text.split())
-            }
+            usage=usage_data
         )
         
         yield f"data: {final_chunk.model_dump_json()}\n\n"

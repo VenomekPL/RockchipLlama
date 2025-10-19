@@ -227,6 +227,19 @@ class BenchmarkRunner:
                             if usage:
                                 metrics.input_tokens = usage.get('prompt_tokens', metrics.input_tokens)
                                 metrics.output_tokens = usage.get('completion_tokens', metrics.output_tokens)
+                                
+                                # Extract RKLLM perf stats if available
+                                if 'prefill_time_ms' in usage:
+                                    metrics.prefill_time_ms = usage['prefill_time_ms']
+                                    metrics.ttft_ms = usage['prefill_time_ms']  # TTFT = prefill time
+                                if 'generate_time_ms' in usage:
+                                    metrics.generate_time_ms = usage['generate_time_ms']
+                                if 'prefill_tokens' in usage:
+                                    metrics.input_tokens = usage['prefill_tokens']
+                                if 'generate_tokens' in usage:
+                                    metrics.output_tokens = usage['generate_tokens']
+                                if 'memory_usage_mb' in usage:
+                                    metrics.memory_usage_mb = usage['memory_usage_mb']
                             
                             chunk_count += 1
                             

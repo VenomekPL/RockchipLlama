@@ -746,43 +746,54 @@ repeat_penalty = 1.1
 
 **CRITICAL ISSUES FOUND**:
 
-**Issue 1: Garbage Output** ❌
+**Issue 1: Garbage Output** ❌ (UNDER INVESTIGATION)
 - NPU generates text but it's **complete nonsense**
 - Example: Asked about "AI and ML", got "Fire Department hiring" and "New Orleans Saints"
 - Output is incoherent, off-topic, repetitive (like "6yo with high fever")
 - Model loads correctly, inference runs, but prompt is not being respected
+- **Hypothesis**: Gemma models may need strong system prompts and proper chat templates
+- **Deferred**: Will implement prompt caching and chat templates later
 
-**Issue 2: Token Counting Wrong** ❌  
-- Benchmark shows 125K tokens/sec = impossibly fast
-- Problem: We calculate `tokens/sec = output_tokens / total_time_ms`
-- WRONG! Should use: `tokens/sec = generate_tokens / generate_time_ms`
-- RKLLM provides `RKLLMPerfStat` in callback with real metrics:
-  - `prefill_time_ms` - TTFT (input processing)
-  - `prefill_tokens` - Input token count
-  - `generate_time_ms` - Generation time only
-  - `generate_tokens` - Output token count
-  - `memory_usage_mb` - Memory usage
-- We have the structure but **not extracting perf data from callback!**
+**Issue 2: Token Counting Wrong** ✅ FIXED!
+- ~~Problem: We calculated `tokens/sec = output_tokens / total_time_ms`~~
+- ~~WRONG! Should use: `tokens/sec = generate_tokens / generate_time_ms`~~
+- **Solution Implemented**:
+  - ✅ Extract `RKLLMPerfStat` from callback in `_callback_impl()`
+  - ✅ Return tuple `(text, perf_stats)` from `generate()`
+  - ✅ Send perf stats in final streaming chunk
+  - ✅ Benchmark extracts real metrics from usage data
+  - ✅ Calculate accurate tokens/sec using `generate_tokens / (generate_time_ms / 1000)`
 
-**Root Cause Investigation**:
-1. ❓ Is prompt being passed correctly to RKLLM?
-2. ❓ Is chat template needed? (Gradio has commented-out set_chat_template)
-3. ❓ Are we using correct input encoding/format?
-4. ❓ Is callback corrupting data somehow?
-5. ❓ Does Gemma need special prompt formatting?
-6. ✅ Token counting: Need to extract `result.perf` in callback
+**RKLLM Performance Metrics Now Available**:
+- `prefill_time_ms` - **TTFT** (input processing time)
+- `prefill_tokens` - Actual input token count from NPU
+- `generate_time_ms` - Pure generation time (excludes TTFT)
+- `generate_tokens` - Actual output tokens generated
+- `memory_usage_mb` - NPU memory usage
+
+**Accurate Speed Calculations**:
+```python
+# Input processing speed
+input_tokens_per_sec = prefill_tokens / (prefill_time_ms / 1000)
+
+# Output generation speed  
+output_tokens_per_sec = generate_tokens / (generate_time_ms / 1000)
+
+# Total throughput
+total_tokens_per_sec = (prefill_tokens + generate_tokens) / ((prefill_time_ms + generate_time_ms) / 1000)
+```
 
 **Benchmark Results**:
 - File: `benchmarks/benchmark_google_gemma_3_270m_w8a8_opt0__20251020_eke9ii.md`
-- 10 tests completed, all "successful" but all outputs garbage
-- Real TTFT: 1.3s - 83s (varies wildly) 
-- No accurate tokens/sec measurement yet
+- 10 tests completed with old metrics (inaccurate)
+- Next run will have accurate RKLLM performance data
 
 **Next Actions**:
-1. Extract RKLLMPerfStat from callback for accurate metrics
-2. Debug prompt handling - why is NPU ignoring our prompts?
-3. Test with chat template (set_chat_template API)
-4. Check if model needs specific prompt format
+1. ✅ DONE: Fix perf stat extraction
+2. 🔄 Re-run benchmark with accurate metrics
+3. ⏳ Debug prompt handling (garbage output)
+4. ⏳ Implement chat templates (later with prompt caching)
+5. ⏳ Test system prompts for instruction following
 
 #### Benchmark System Improvements
 - ✅ Fixed model name in benchmark filenames (now includes model name)

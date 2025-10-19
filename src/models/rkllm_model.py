@@ -160,6 +160,7 @@ class RKLLMModel:
         self.current_callback = None
         self.generated_text = []
         self.generation_state = None
+        self.perf_stats = None  # Will be populated by callback
         
         # Validate paths
         if not os.path.exists(model_path):
@@ -175,6 +176,17 @@ class RKLLMModel:
         try:
             if state == LLMCallState.RKLLM_RUN_FINISH:
                 self.generation_state = state
+                # Extract final performance stats
+                if result and result.contents:
+                    perf = result.contents.perf
+                    self.perf_stats = {
+                        'prefill_time_ms': perf.prefill_time_ms,
+                        'prefill_tokens': perf.prefill_tokens,
+                        'generate_time_ms': perf.generate_time_ms,
+                        'generate_tokens': perf.generate_tokens,
+                        'memory_usage_mb': perf.memory_usage_mb
+                    }
+                    logger.debug(f"Performance stats: {self.perf_stats}")
                 logger.debug("Generation finished")
             elif state == LLMCallState.RKLLM_RUN_ERROR:
                 self.generation_state = state
@@ -285,7 +297,7 @@ class RKLLMModel:
         top_k: int = 20,  # User preference
         repeat_penalty: float = 1.1,
         callback: Optional[Callable[[str], None]] = None
-    ) -> str:
+    ) -> tuple[str, Optional[dict]]:
         """
         Generate text completion using REAL NPU
         
@@ -347,10 +359,12 @@ class RKLLMModel:
             if ret != 0:
                 raise RuntimeError(f"rkllm_run failed with code: {ret}")
             
-            # Return generated text
+            # Return generated text and perf stats
             result = ''.join(self.generated_text)
             logger.info(f"Generated {len(result)} characters")
-            return result
+            
+            # Return tuple: (text, perf_stats)
+            return result, self.perf_stats
             
         except Exception as e:
             logger.error(f"Generation failed: {e}", exc_info=True)
