@@ -641,9 +641,21 @@ async def generate_cache(
         # Get binary cache path
         binary_cache_path = cache_mgr.get_cache_path(model_name, cache_name)
         
-        # Check if already exists
+        # Check if already exists - delete it first
         if cache_mgr.cache_exists(model_name, cache_name):
-            logger.warning(f"Binary cache '{cache_name}' already exists, will be overwritten")
+            logger.warning(f"Binary cache '{cache_name}' already exists, deleting before recreation")
+            # Delete existing cache file
+            try:
+                import os
+                if os.path.exists(binary_cache_path):
+                    os.remove(binary_cache_path)
+                    logger.info(f"Deleted existing cache file: {binary_cache_path}")
+            except Exception as e:
+                logger.error(f"Failed to delete existing cache: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Cannot overwrite existing cache: {e}"
+                )
         
         logger.info(f"🔥 Generating binary cache: {cache_name}")
         logger.info(f"   Prompt length: {len(prompt)} chars")
