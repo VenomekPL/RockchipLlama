@@ -21,7 +21,10 @@ from api.schemas import (
     ModelListResponse,
     ModelInfo,
     ErrorResponse,
-    MessageRole
+    MessageRole,
+    CompletionRequest,
+    CompletionResponse,
+    CompletionChoice
 )
 from models.model_manager import model_manager
 from config.settings import settings
@@ -307,6 +310,79 @@ async def stream_chat_completion(
         logger.error(f"Error in streaming: {e}", exc_info=True)
         error_data = {"error": {"message": str(e), "type": "internal_error"}}
         yield f"data: {json.dumps(error_data)}\n\n"
+
+
+@router.post("/completions", response_model=CompletionResponse)
+async def create_completion(request: CompletionRequest):
+    """
+    Create a text completion (OpenAI compatible)
+    
+    Endpoint: POST /v1/completions
+    
+    Simple one-shot completion without chat formatting.
+    For multi-turn conversations, use /v1/chat/completions instead.
+    """
+    try:
+        logger.info(f"Text completion request for model: {request.model}")
+        logger.debug(f"Prompt length: {len(request.prompt)}, Stream: {request.stream}")
+        
+        # Ensure model is loaded
+        current_model = await ensure_model_loaded(preferred_model=request.model)
+        
+        # Generate completion ID and timestamp
+        completion_id = f"cmpl-{uuid.uuid4().hex[:12]}"
+        created_time = int(time.time())
+        
+        # Handle streaming response
+        if request.stream:
+            raise HTTPException(
+                status_code=501,
+                detail="Streaming not yet implemented for text completions. Use stream=false or /v1/chat/completions for streaming."
+            )
+        
+        # Non-streaming response
+        generated_text, perf_stats = current_model.generate(
+            prompt=request.prompt,
+            max_new_tokens=request.max_tokens or 512,
+            temperature=request.temperature or 0.8,
+            top_p=request.top_p or 0.9,
+            top_k=request.top_k or 20,
+            repeat_penalty=request.repeat_penalty or 1.1
+        )
+        
+        # Log performance stats if available
+        if perf_stats:
+            logger.info(f"Performance: TTFT={perf_stats.get('prefill_time_ms', 0):.1f}ms, "
+                       f"Gen={perf_stats.get('generate_time_ms', 0):.1f}ms, "
+                       f"Tokens={perf_stats.get('generate_tokens', 0)}, "
+                       f"Speed={perf_stats.get('generate_tokens', 0) / (perf_stats.get('generate_time_ms', 1) / 1000):.1f} tok/s")
+        
+        # Create response
+        response = CompletionResponse(
+            id=completion_id,
+            created=created_time,
+            model=request.model,
+            choices=[
+                CompletionChoice(
+                    text=generated_text,
+                    index=0,
+                    finish_reason="stop"
+                )
+            ],
+            usage=Usage(
+                prompt_tokens=len(request.prompt.split()),  # Rough estimate
+                completion_tokens=len(generated_text.split()),  # Rough estimate
+                total_tokens=len(request.prompt.split()) + len(generated_text.split())
+            )
+        )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in text completion: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/models", response_model=ModelListResponse)
