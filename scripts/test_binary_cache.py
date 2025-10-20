@@ -10,19 +10,18 @@ import time
 
 BASE_URL = "http://localhost:8080/v1"
 
-def test_binary_cache_generation():
-    """Test binary cache generation from text cache"""
+def test_cache_generation():
+    """Test binary cache generation"""
     print("\n" + "="*80)
     print("TEST: Generate Binary Cache for System Prompt")
     print("="*80)
     
-    # Generate binary cache from existing text cache
     print("\n1. Generating binary cache...")
     response = requests.post(
-        f"{BASE_URL}/cache/qwen3-0.6b/generate-binary",
+        f"{BASE_URL}/cache/qwen3-0.6b",
         json={
-            "cache_name": "system"
-            # No prompt - will load from text cache
+            "cache_name": "system",
+            "prompt": "You are a helpful AI assistant. You are knowledgeable, concise, and friendly."
         }
     )
     
@@ -40,10 +39,10 @@ def test_binary_cache_generation():
     return True
 
 
-def test_binary_cache_with_custom_prompt():
+def test_custom_cache():
     """Test binary cache generation with custom prompt"""
     print("\n" + "="*80)
-    print("TEST: Generate Binary Cache with Custom Prompt")
+    print("TEST: Generate Cache with Custom Prompt")
     print("="*80)
     
     custom_prompt = """You are a helpful AI assistant specialized in Python programming.
@@ -52,7 +51,7 @@ Always provide examples and explain your reasoning."""
     
     print("\n1. Generating binary cache with custom prompt...")
     response = requests.post(
-        f"{BASE_URL}/cache/qwen3-0.6b/generate-binary",
+        f"{BASE_URL}/cache/qwen3-0.6b",
         json={
             "cache_name": "python_expert",
             "prompt": custom_prompt
@@ -73,39 +72,24 @@ Always provide examples and explain your reasoning."""
     return True
 
 
-def compare_ttft_with_without_cache():
-    """Compare TTFT with and without binary cache"""
+def test_list_caches():
+    """Test listing caches"""
     print("\n" + "="*80)
-    print("TEST: Compare TTFT - With vs Without Binary Cache")
+    print("TEST: List Binary Caches")
     print("="*80)
     
-    test_prompt = "Write a Python function to calculate fibonacci numbers."
+    print("\n1. Listing caches for qwen3-0.6b...")
+    response = requests.get(f"{BASE_URL}/cache/qwen3-0.6b")
     
-    # Test 1: Without cache (baseline)
-    print("\n1. Testing WITHOUT binary cache (baseline)...")
-    start = time.time()
-    response = requests.post(
-        f"{BASE_URL}/chat/completions",
-        json={
-            "model": "current",
-            "messages": [{"role": "user", "content": test_prompt}],
-            "max_tokens": 100,
-            "temperature": 0.7
-        }
-    )
-    baseline_time = (time.time() - start) * 1000
-    
+    print(f"Status: {response.status_code}")
     if response.status_code == 200:
-        print(f"   Time: {baseline_time:.1f} ms")
+        result = response.json()
+        print(f"✅ Found {len(result)} cache(s):")
+        for cache in result:
+            print(f"   - {cache['cache_name']}: {cache['size_mb']:.2f} MB")
     else:
-        print(f"   ❌ Failed: {response.status_code}")
+        print(f"❌ Failed: {response.text}")
         return False
-    
-    # TODO: Test 2 will require updating the API to support loading binary cache
-    # For now, this shows the baseline TTFT
-    
-    print(f"\n📊 Baseline TTFT: {baseline_time:.1f} ms")
-    print(f"   Expected with cache: ~{baseline_time * 0.3:.1f}-{baseline_time * 0.5:.1f} ms (50-70% reduction)")
     
     return True
 
@@ -129,9 +113,9 @@ def main():
         return
     
     tests = [
-        ("Binary Cache Generation (System)", test_binary_cache_generation),
-        ("Binary Cache with Custom Prompt", test_binary_cache_with_custom_prompt),
-        ("TTFT Comparison", compare_ttft_with_without_cache),
+        ("Binary Cache Generation (System)", test_cache_generation),
+        ("Binary Cache with Custom Prompt", test_custom_cache),
+        ("List Binary Caches", test_list_caches),
     ]
     
     results = []

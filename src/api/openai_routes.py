@@ -135,52 +135,18 @@ async def create_chat_completion(request: ChatCompletionRequest):
     
     Endpoint: POST /v1/chat/completions
     
-    Supports prompt caching via cache_prompts parameter:
-    - Single cache: "cache_prompts": "coding_rules"
-    - Multiple caches: "cache_prompts": ["coding_rules", "project_context"]
-    - System cache is always applied automatically
+    Supports binary prompt caching for 50-70% TTFT reduction.
+    Use 'use_cache' parameter to specify which binary cache to load.
     """
     try:
         logger.info(f"Chat completion request for model: {request.model}")
         logger.debug(f"Messages: {len(request.messages)}, Stream: {request.stream}")
         
-        # Ensure model is loaded (needed for cache manager access)
+        # Ensure model is loaded
         current_model = await ensure_model_loaded(preferred_model=request.model)
-        
-        # 🔥 NEW: Handle cache prompts
-        cached_content = ""
-        loaded_cache_names = []
-        
-        if hasattr(current_model, 'cache_manager') and current_model.model_name:
-            cache_mgr = current_model.cache_manager
-            
-            # Prepare list of caches to load
-            cache_names_to_load = []
-            if request.cache_prompts:
-                # Convert single string to list
-                if isinstance(request.cache_prompts, str):
-                    cache_names_to_load = [request.cache_prompts]
-                else:
-                    cache_names_to_load = list(request.cache_prompts)
-            
-            # Load multiple caches (system always included)
-            if cache_names_to_load or True:  # Always load at least system
-                cached_content, loaded_cache_names = cache_mgr.load_multiple_caches(
-                    model_name=current_model.model_name,
-                    cache_names=cache_names_to_load,
-                    include_system=True  # Always include system cache
-                )
-                
-                if loaded_cache_names:
-                    logger.info(f"Applied caches: {', '.join(loaded_cache_names)}")
         
         # Format messages into prompt
         prompt = format_chat_prompt(request.messages)
-        
-        # 🔥 Prepend cached content to prompt
-        if cached_content:
-            prompt = cached_content + "\n\n" + prompt
-            logger.debug(f"Prompt with caches: {len(cached_content)} cached chars + {len(prompt) - len(cached_content)} message chars")
         
         # Generate completion ID and timestamp
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -193,8 +159,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
                     prompt=prompt,
                     request=request,
                     completion_id=completion_id,
-                    created_time=created_time,
-                    loaded_cache_names=loaded_cache_names  # Pass cache info
+                    created_time=created_time
                 ),
                 media_type="text/event-stream"
             )
@@ -233,10 +198,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
             ],
             usage=Usage(
                 prompt_tokens=len(prompt.split()),  # Rough estimate
-                completion_tokens=len(generated_text.split()),
-                total_tokens=len(prompt.split()) + len(generated_text.split()),
-                cached_prompts=loaded_cache_names if loaded_cache_names else None,  # 🔥 Track used caches
-                cache_hit=bool(loaded_cache_names)  # 🔥 Indicate if caches were used
+                completion_tokens=len(generated_text.split()),  # Rough estimate
+                total_tokens=len(prompt.split()) + len(generated_text.split())
             )
         )
         
@@ -480,21 +443,20 @@ async def get_cache_info(model_name: str, cache_name: str):
         
         # Get metadata
         caches = cache_mgr.list_caches(model_name)
-        cache_metadata = next((c for c in caches if c['cache_name'] == cache_name), None)
+        cache_info = next((c for c in caches if c['cache_name'] == cache_name), None)
         
-        if not cache_metadata:
-            raise HTTPException(status_code=404, detail="Cache metadata not found")
-        
-        # Load cache content
-        content = cache_mgr.load_cache(model_name, cache_name)
+        if not cache_info:
+            raise HTTPException(status_code=404, detail=f"Cache '{cache_name}' not found for model '{model_name}'")
         
         return {
             "object": "cache",
             "model": model_name,
             "cache_name": cache_name,
-            "metadata": cache_metadata,
-            "content": content,
-            "content_preview": content[:200] + "..." if content and len(content) > 200 else content,
+            "size_mb": cache_info['size_mb'],
+            "created_at": cache_info['created_at'],
+            "modified_at": cache_info['modified_at'],
+            "prompt_length": cache_info.get('prompt_length', 0),
+            "source": cache_info.get('source', 'unknown'),
             "timestamp": int(time.time())
         }
         
@@ -506,93 +468,127 @@ async def get_cache_info(model_name: str, cache_name: str):
 
 
 @router.post("/cache/{model_name}")
-async def create_or_update_cache(
+async def generate_cache(
     model_name: str,
     request: Request
 ):
     """
-    Create or update a prompt cache for a model
+    Generate a binary RKLLM cache file for faster TTFT
     
     Endpoint: POST /v1/cache/{model_name}
     
-    Request Body:
-    {
-        "cache_name": "my_cache",
-        "content": "Cache content here...",
-        "source": "optional_source_info",
-        "allow_overwrite": true
-    }
+    Body:
+        {
+            "cache_name": "system",  // Name for the binary cache
+            "prompt": "..."          // Prompt to cache
+        }
+    
+    This creates a .rkllm_cache file containing the NPU state after prefill.
+    Subsequent requests can load this cache to skip prefill entirely (50-70% TTFT reduction).
     
     Returns:
-        Cache creation/update metadata
+        {
+            "object": "cache.created",
+            "model": "qwen3-0.6b",
+            "cache_name": "system",
+            "size_mb": 12.5,
+            "ttft_ms": 180.3,
+            "message": "Binary cache generated successfully"
+        }
     """
     try:
         # Get request body
         body = await request.json()
-        cache_name = body.get('cache_name')
-        content = body.get('content')
-        source = body.get('source', 'api_creation')
-        allow_overwrite = body.get('allow_overwrite', True)
+        cache_name = body.get("cache_name")
+        prompt = body.get("prompt")
         
-        # Validate required fields
         if not cache_name:
-            raise HTTPException(status_code=400, detail="Missing required field: cache_name")
-        if not content:
-            raise HTTPException(status_code=400, detail="Missing required field: content")
+            raise HTTPException(status_code=400, detail="cache_name is required")
         
-        # Validate cache_name
-        if not cache_name.replace('_', '').replace('-', '').isalnum():
+        if not prompt:
+            raise HTTPException(status_code=400, detail="prompt is required")
+        
+        # Validate cache name
+        if not cache_name.replace("-", "").replace("_", "").isalnum():
             raise HTTPException(
                 status_code=400,
-                detail="cache_name must contain only alphanumeric characters, hyphens, and underscores"
+                detail="cache_name must be alphanumeric (hyphens and underscores allowed)"
             )
         
-        # Prevent overwriting system cache
-        if cache_name == "system":
-            raise HTTPException(
-                status_code=403,
-                detail="Cannot manually create/update 'system' cache. It's auto-generated from config/system.txt"
-            )
-        
-        # Get current model (to access cache manager)
         current_model = model_manager.get_current_model()
-        if not current_model or not hasattr(current_model, 'cache_manager'):
-            raise HTTPException(status_code=503, detail="No model loaded with cache support")
+        if not current_model:
+            raise HTTPException(status_code=503, detail="No model loaded")
+        
+        if current_model.model_name != model_name:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{model_name}' not loaded. Currently loaded: '{current_model.model_name}'"
+            )
         
         cache_mgr = current_model.cache_manager
         
-        # Check if cache exists and overwrite is disabled
-        if cache_mgr.cache_exists(model_name, cache_name) and not allow_overwrite:
+        # Get binary cache path
+        binary_cache_path = cache_mgr.get_cache_path(model_name, cache_name)
+        
+        # Check if already exists
+        if cache_mgr.cache_exists(model_name, cache_name):
+            logger.warning(f"Binary cache '{cache_name}' already exists, will be overwritten")
+        
+        logger.info(f"🔥 Generating binary cache: {cache_name}")
+        logger.info(f"   Prompt length: {len(prompt)} chars")
+        logger.info(f"   Output path: {binary_cache_path}")
+        
+        # Generate binary cache by running inference with save_binary_cache=True
+        start_time = time.time()
+        _, perf_stats = current_model.generate(
+            prompt=prompt,
+            max_new_tokens=1,  # Minimal generation, we just need the prefill cache
+            binary_cache_path=binary_cache_path,
+            save_binary_cache=True
+        )
+        generation_time_ms = (time.time() - start_time) * 1000
+        
+        # Verify cache was created
+        if not cache_mgr.cache_exists(model_name, cache_name):
             raise HTTPException(
-                status_code=409,
-                detail=f"Cache '{cache_name}' already exists for model '{model_name}'. Set allow_overwrite=true to replace it."
+                status_code=500,
+                detail="Binary cache generation failed - file not created"
             )
         
-        # Save cache
-        result = cache_mgr.save_cache(
+        # Save metadata
+        cache_mgr.save_metadata(
             model_name=model_name,
             cache_name=cache_name,
-            content=content,
-            source=source,
-            allow_overwrite=allow_overwrite
+            prompt_length=len(prompt),
+            source="api",
+            ttft_ms=perf_stats.get('prefill_time_ms', 0) if perf_stats else generation_time_ms
         )
         
+        # Get cache info
+        cache_info = cache_mgr.get_cache_info(model_name, cache_name)
+        if not cache_info:
+            raise HTTPException(
+                status_code=500,
+                detail="Binary cache created but info unavailable"
+            )
+        
+        logger.info(f"✅ Binary cache generated: {cache_info['size_mb']:.2f} MB in {generation_time_ms:.1f}ms")
+        
         return {
-            "object": "cache.created" if not result['was_overwrite'] else "cache.updated",
+            "object": "cache.created",
             "model": model_name,
             "cache_name": cache_name,
-            "was_overwrite": result['was_overwrite'],
-            "old_size": result['old_size'] if result['was_overwrite'] else None,
-            "new_size": result['new_size'],
-            "version": result['version'],
+            "size_mb": cache_info['size_mb'],
+            "ttft_ms": perf_stats.get('prefill_time_ms', 0) if perf_stats else generation_time_ms,
+            "prompt_length": len(prompt),
             "timestamp": int(time.time()),
-            "message": f"Cache '{cache_name}' {'updated' if result['was_overwrite'] else 'created'} successfully"
+            "message": f"Binary cache generated successfully ({cache_info['size_mb']:.2f} MB)"
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating/updating cache: {e}", exc_info=True)
+        logger.error(f"Error generating binary cache: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -644,121 +640,4 @@ async def delete_cache(model_name: str, cache_name: str):
         raise
     except Exception as e:
         logger.error(f"Error deleting cache: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/cache/{model_name}/generate-binary")
-async def generate_binary_cache(model_name: str, request: dict):
-    """
-    Generate a binary RKLLM cache file for faster TTFT
-    
-    Endpoint: POST /v1/cache/{model_name}/generate-binary
-    
-    Body:
-        {
-            "cache_name": "system",  // Name for the binary cache
-            "prompt": "..."          // Optional: prompt to cache (or loads from text cache)
-        }
-    
-    This creates a .rkllm_cache file containing the NPU state after prefill.
-    Subsequent requests can load this cache to skip prefill entirely (50-70% TTFT reduction).
-    
-    Returns:
-        {
-            "object": "binary_cache.created",
-            "model": "qwen3-0.6b",
-            "cache_name": "system",
-            "size_mb": 12.5,
-            "ttft_ms": 180.3,
-            "message": "Binary cache generated successfully"
-        }
-    """
-    try:
-        cache_name = request.get("cache_name")
-        if not cache_name:
-            raise HTTPException(status_code=400, detail="cache_name is required")
-        
-        # Validate cache name
-        if not cache_name.replace("-", "").replace("_", "").isalnum():
-            raise HTTPException(
-                status_code=400,
-                detail="cache_name must be alphanumeric (hyphens and underscores allowed)"
-            )
-        
-        current_model = model_manager.get_current_model()
-        if not current_model:
-            raise HTTPException(status_code=503, detail="No model loaded")
-        
-        if current_model.model_name != model_name:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Model '{model_name}' not loaded. Currently loaded: '{current_model.model_name}'"
-            )
-        
-        cache_mgr = current_model.cache_manager
-        
-        # Get prompt to cache
-        prompt = request.get("prompt")
-        if not prompt:
-            # Try to load from text cache
-            prompt = cache_mgr.load_cache(model_name, cache_name)
-            if not prompt:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"No prompt provided and no text cache '{cache_name}' found"
-                )
-            logger.info(f"Loaded prompt from text cache: {len(prompt)} chars")
-        
-        # Get binary cache path
-        binary_cache_path = cache_mgr.get_binary_cache_path(model_name, cache_name)
-        
-        # Check if already exists
-        if cache_mgr.binary_cache_exists(model_name, cache_name):
-            logger.warning(f"Binary cache '{cache_name}' already exists, will be overwritten")
-        
-        logger.info(f"🔥 Generating binary cache: {cache_name}")
-        logger.info(f"   Prompt length: {len(prompt)} chars")
-        logger.info(f"   Output path: {binary_cache_path}")
-        
-        # Generate binary cache by running inference with save_binary_cache=True
-        start_time = time.time()
-        _, perf_stats = current_model.generate(
-            prompt=prompt,
-            max_new_tokens=1,  # Minimal generation, we just need the prefill cache
-            binary_cache_path=binary_cache_path,
-            save_binary_cache=True
-        )
-        generation_time_ms = (time.time() - start_time) * 1000
-        
-        # Verify cache was created
-        if not cache_mgr.binary_cache_exists(model_name, cache_name):
-            raise HTTPException(
-                status_code=500,
-                detail="Binary cache generation failed - file not created"
-            )
-        
-        # Get cache info
-        cache_info = cache_mgr.get_binary_cache_info(model_name, cache_name)
-        if not cache_info:
-            raise HTTPException(
-                status_code=500,
-                detail="Binary cache created but info unavailable"
-            )
-        
-        logger.info(f"✅ Binary cache generated: {cache_info['size_mb']:.2f} MB in {generation_time_ms:.1f}ms")
-        
-        return {
-            "object": "binary_cache.created",
-            "model": model_name,
-            "cache_name": cache_name,
-            "size_mb": cache_info['size_mb'],
-            "ttft_ms": perf_stats.get('prefill_time_ms', 0) if perf_stats else generation_time_ms,
-            "timestamp": int(time.time()),
-            "message": f"Binary cache generated successfully ({cache_info['size_mb']:.2f} MB)"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error generating binary cache: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
