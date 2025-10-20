@@ -98,11 +98,17 @@ class RKLLMInput(ctypes.Structure):
     ]
 
 class RKLLMPromptCacheParam(ctypes.Structure):
-    """RKLLM Prompt Cache Parameter - for binary NPU state caching"""
+    """RKLLM Prompt Cache Parameter - for binary NPU state caching
+    
+    MUST match official rkllm.h structure:
+    typedef struct {
+        int save_prompt_cache;          // 0=don't save, 1=save
+        const char* prompt_cache_path;  // Path to cache file
+    } RKLLMPromptCacheParam;
+    """
     _fields_ = [
-        ("prompt_cache_path", ctypes.c_char_p),  # Path to binary cache file
-        ("save_prompt_cache", ctypes.c_int),     # 1=save, 0=load
-        ("num_input", ctypes.c_int)              # Number of input tokens
+        ("save_prompt_cache", ctypes.c_int),     # 1=save, 0=load (FIRST!)
+        ("prompt_cache_path", ctypes.c_char_p)   # Path to binary cache file (SECOND!)
     ]
 
 class RKLLMInferParam(ctypes.Structure):
@@ -396,14 +402,14 @@ class RKLLMModel:
             prompt_cache = None
             if binary_cache_path:
                 prompt_cache = RKLLMPromptCacheParam()
-                prompt_cache.prompt_cache_path = binary_cache_path.encode('utf-8')
                 prompt_cache.save_prompt_cache = 1 if save_binary_cache else 0
-                prompt_cache.num_input = len(prompt)  # Approximate token count
+                prompt_cache.prompt_cache_path = binary_cache_path.encode('utf-8')
                 infer_params.prompt_cache_params = ctypes.cast(
                     ctypes.pointer(prompt_cache),
                     ctypes.c_void_p
                 )
-                logger.debug(f"Binary cache configured: save={save_binary_cache}, tokens≈{len(prompt)}")
+                action = "save" if save_binary_cache else "load"
+                logger.info(f"Binary cache: {action} at {binary_cache_path}")
             else:
                 infer_params.prompt_cache_params = None
             
