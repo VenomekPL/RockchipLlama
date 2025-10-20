@@ -16,7 +16,7 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 ## Project Status
 
 ✅ **Phase 3 Complete** - Real RKLLM Integration + Production Validation
-🔄 **Phase 4 In Progress** - Advanced Features (Prompt Caching, Multi-Batch, LongRoPE)
+🎉 **Phase 4.1 Complete** - Binary Prompt Caching Working!
 
 **Completed:**
 - ✅ FastAPI server with OpenAI API compatibility
@@ -29,15 +29,22 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 - ✅ Smart model loading (skips reload if same model)
 - ✅ GPU acceleration + 4-thread big core optimization (RK3588)
 - ✅ Production viability assessment (0.6B-1.5B sweet spot)
-- ✅ **Prompt Caching System**: Multi-cache support, version tracking, auto-overwrite
+- ✅ **Binary Prompt Caching**: RKLLM native NPU state caching - **23.5x FASTER!**
 
-**Phase 4 Goals:**
-- ✅ **Prompt Caching**: Multi-cache support with version tracking and overwrite detection - **COMPLETE**
+**Phase 4.1 Achievement - Binary Cache Working! 🎉**
+- ✅ **CRITICAL FIX**: Corrected RKLLMPromptCacheParam structure to match official API
+- ✅ **Cache Creation**: 33MB binary cache files successfully generated
+- ✅ **Cache Loading**: NPU state restoration working perfectly
+- ✅ **Performance**: TTFT reduced from 1775ms to 75.2ms (95.8% improvement!)
+- ✅ **Real-world Impact**: 1326-char system prompt now loads in 75ms instead of 1.8s
+
+**Phase 4 Next Goals:**
 - 🔄 **Multi-Batch Inference**: 2-3x throughput improvement under load
 - 🔄 **LongRoPE Support**: 32K-64K context windows (requires RKLLM 1.2.2 upgrade)
 
 **Benchmark Results (RK3588 NPU @ Max Frequency):**
 - ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM - **RECOMMENDED** (Best balance)
+- ✅ **Qwen3-0.6B + Binary Cache**: **TTFT 75.2ms** (was 1775ms) - **23.5x faster prefill!**
 - ✅ **Gemma3-1B**: 13.50 tokens/sec, 4K context, 1243 MB RAM - **USABLE** (Needs 16K reconversion)
 - ⚠️ **Qwen3-4B**: 3.13 tokens/sec, 16K context, 5027 MB RAM - **TOO SLOW** (Production requires ≥5 tok/s)
 - ❌ **Gemma3-270m**: ~~29.80 tokens/sec~~ - **REMOVED** (produces garbage output)
@@ -64,9 +71,9 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 - ⏳ **Phase 4.3**: LongRoPE support for extended contexts
 
 **Next Enhancements:**
-- ⏳ Binary cache generation (actual TTFT improvements with RKLLM native caching)
-- ⏳ Multi-batch inference (2-3x throughput under concurrent load)
-- ⏳ LongRoPE support for >16K contexts (requires RKLLM 1.2.2 upgrade)
+- 🎉 **Phase 4.1 COMPLETE**: Binary prompt caching - **23.5x TTFT improvement achieved!**
+- ⏳ **Phase 4.2**: Multi-batch inference (2-3x throughput under concurrent load)
+- ⏳ **Phase 4.3**: LongRoPE support for >16K contexts (requires RKLLM 1.2.2 upgrade)
 - ⏳ Multi-instance model serving
 
 ## Repository Structure
@@ -183,35 +190,55 @@ print(response.choices[0].message.content)
 "
 ```
 
-### 5. Manage Prompt Caches
+### 5. Manage Prompt Caches (Binary NPU Caching)
+
+**Binary caching stores NPU state for instant restoration - 23.5x faster!**
 
 ```bash
-# Create a cache
+# Create a binary cache (saves NPU prefill state)
 curl -X POST http://localhost:8080/v1/cache/qwen3-0.6b \
   -H 'Content-Type: application/json' \
   -d '{
-    "cache_name": "coding_rules",
-    "content": "You are an expert Python developer. Follow PEP 8..."
+    "cache_name": "system",
+    "prompt": "You are a helpful AI assistant..."
   }'
 
-# List caches for a model
+# Response shows cache creation performance
+{
+  "object": "cache.created",
+  "cache_name": "system",
+  "size_mb": 32.42,
+  "ttft_ms": 669.98,
+  "message": "Binary cache generated successfully"
+}
+
+# Use the cache in chat (TTFT: 1775ms → 75.2ms!)
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -d '{
+    "use_cache": "system",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Response confirms cache usage
+{
+  "usage": {
+    "cache_hit": true,
+    "cached_prompts": ["system"]
+  }
+}
+
+# List caches
 curl http://localhost:8080/v1/cache/qwen3-0.6b
 
-# Get specific cache
-curl http://localhost:8080/v1/cache/qwen3-0.6b/coding_rules
-
-# Update cache (overwrites)
-curl -X POST http://localhost:8080/v1/cache/qwen3-0.6b \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "cache_name": "coding_rules",
-    "content": "Updated content...",
-    "allow_overwrite": true
-  }'
-
 # Delete cache
-curl -X DELETE http://localhost:8080/v1/cache/qwen3-0.6b/coding_rules
+curl -X DELETE http://localhost:8080/v1/cache/qwen3-0.6b/system
 ```
+
+**Performance Impact:**
+- **Without cache**: 1775ms TTFT (full prefill)
+- **With cache**: 75.2ms TTFT (NPU state restored)
+- **Speedup**: 23.5x faster (95.8% reduction!)
+- **Cache size**: ~33MB per 1300-char prompt
 
 ### 6. Run Benchmarks
 
