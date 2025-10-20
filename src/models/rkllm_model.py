@@ -325,44 +325,14 @@ class RKLLMModel:
         Ensure system prompt cache exists for this model.
         If not, generate it from config/system.txt.
         This is a BLOCKING operation - model won't be ready until cache is created.
+        
+        NOTE: Disabled in favor of manual binary cache creation via API.
+        Use POST /v1/cache/{model} to create binary caches.
         """
-        if not self.model_name:
-            logger.error("Model name not set - cannot generate system cache")
-            return
-        
-        cache_name = "system"
-        
-        # Check if cache already exists
-        if self.cache_manager.cache_exists(self.model_name, cache_name):
-            logger.info(f"System cache already exists for {self.model_name}")
-            return
-        
-        logger.info(f"⏳ Generating system cache for {self.model_name}...")
-        logger.info(f"   This will block model readiness until complete.")
-        
-        try:
-            # Load system prompt template
-            system_prompt = self.system_prompt_generator.load_system_prompt()
-            logger.info(f"   Loaded system prompt: {len(system_prompt)} chars")
-            
-            # Generate cache by running inference (this creates the cached state)
-            # For now, we'll just save the prompt text
-            # TODO: In full implementation, we'd run inference and save binary cache
-            
-            # Save cache with metadata
-            source_path = self.system_prompt_generator.get_cache_source_path()
-            self.cache_manager.save_cache(
-                model_name=self.model_name,
-                cache_name=cache_name,
-                content=system_prompt,
-                source=source_path
-            )
-            
-            logger.info(f"✅ System cache generated successfully for {self.model_name}")
-            
-        except Exception as e:
-            logger.error(f"Failed to generate system cache: {e}")
-            raise
+        # Old text cache auto-generation removed
+        # Binary caches must be created explicitly via API for better control
+        logger.info(f"System cache auto-generation disabled. Create caches via POST /v1/cache/{self.model_name}")
+        return
     
     def generate(
         self,
