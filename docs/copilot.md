@@ -292,12 +292,66 @@ RockchipLlama/
   - [ ] Monitor memory usage during long-context inference
   - [ ] Test context length limits
 - **Expected Impact**: 32K-64K context support (up from current 16K max)
+- **Blocked on**: Rockchip RKLLM 1.2.2 release
+
+#### 4.4: Ollama API Compatibility 🦙 (Universal Server)
+- [ ] Ollama API endpoint implementation
+  - [ ] POST /api/generate - Text generation (Ollama format)
+  - [ ] POST /api/chat - Chat completion (Ollama format)
+  - [ ] GET /api/tags - List available models
+  - [ ] POST /api/show - Show model information
+  - [ ] POST /api/pull - Model management (adapter to our system)
+  - [ ] POST /api/push - Model upload (optional)
+  - [ ] DELETE /api/delete - Remove model
+- [ ] Format translation
+  - [ ] Ollama request → OpenAI internal format
+  - [ ] OpenAI response → Ollama format
+  - [ ] Streaming response support
+  - [ ] Temperature/top_p/top_k mapping
+- [ ] Model name aliasing
+  - [ ] Support Ollama model naming (e.g., "qwen2:0.5b")
+  - [ ] Map to internal model files
+  - [ ] Version tag support
+- [ ] Testing and validation
+  - [ ] Test with Ollama CLI client
+  - [ ] Validate with Ollama-compatible apps
+  - [ ] Document Ollama endpoint usage
+  - [ ] Create compatibility guide
+- **Goal**: Universal local LLM server (OpenAI OR Ollama compatible)
+- **Impact**: Drop-in replacement for both OpenAI and Ollama servers
+
+#### 4.5: Embeddings API 📊 (Vector Support)
+- [ ] Embedding model support
+  - [ ] Research RKLLM embedding model conversion
+  - [ ] Convert small embedding model (e.g., all-MiniLM-L6-v2)
+  - [ ] Test embedding inference on NPU
+  - [ ] Benchmark embedding performance
+- [ ] Embeddings API endpoints
+  - [ ] POST /v1/embeddings - OpenAI format
+  - [ ] POST /api/embeddings - Ollama format (if different)
+  - [ ] Batch embedding support
+  - [ ] Document embedding usage
+- [ ] Performance optimization
+  - [ ] Batch embedding requests
+  - [ ] Efficient token encoding
+  - [ ] Memory management for large batches
+- [ ] Use case validation
+  - [ ] Test with vector databases (ChromaDB, etc.)
+  - [ ] RAG (Retrieval Augmented Generation) integration
+  - [ ] Semantic search examples
+  - [ ] Document integration guide
+- **Goal**: Complete LLM + embeddings server on NPU
+- **Impact**: Enable RAG and semantic search on edge devices
 
 **Phase 4 Success Criteria:**
-- ✅ **Phase 4.1 COMPLETE**: Text-based prompt caching with multi-cache support
-  - ✅ Multi-cache combination working (system + user caches)
-  - ✅ Overwrite detection with version tracking
-  - ✅ Complete API for cache CRUD operations
+- ✅ **Phase 4.1 COMPLETE**: Binary prompt caching (23.5x speedup achieved!)
+  - ✅ Binary cache creation with NPU state saving
+  - ✅ Cache loading with instant restoration
+  - ✅ 95.8% TTFT reduction validated
+- [ ] **Phase 4.2**: Multi-batch inference (2-3x throughput)
+- [ ] **Phase 4.3**: LongRoPE support (32K-64K context)
+- [ ] **Phase 4.4**: Ollama API compatibility (universal server)
+- [ ] **Phase 4.5**: Embeddings API (RAG support)
   - ✅ Comprehensive documentation (3 docs, 30KB)
   - ⏳ Binary cache generation (next: actual TTFT reduction)
 - ⏳ Multi-batch increases throughput by ≥2x under load
