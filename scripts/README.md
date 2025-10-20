@@ -1,39 +1,75 @@
-# Scripts Directory
+# Scripts Directory# Scripts Directory
 
-This directory contains all test and benchmark scripts for the RockchipLlama project.
 
-## 📋 Scripts Overview
 
-### Benchmark Scripts
+Benchmark and performance testing tools for RockchipLlama.This directory contains all test and benchmark scripts for the RockchipLlama project.
+
+
+
+## Benchmark Scripts## 📋 Scripts Overview
+
+
+
+### benchmark.py (23 KB)### Benchmark Scripts
+
+**Full-featured benchmark suite with comprehensive metrics**
 
 **`benchmark.py`** (22KB)
-- Comprehensive performance benchmarking suite
-- Measures TTFT, tokens/sec, input processing speed, memory usage
-- Supports performance and quality test suites
-- Statistical analysis with multiple runs
+
+Usage:- Comprehensive performance benchmarking suite
+
+```bash- Measures TTFT, tokens/sec, input processing speed, memory usage
+
+# Performance tests (5 prompts)- Supports performance and quality test suites
+
+python scripts/benchmark.py --type performance- Statistical analysis with multiple runs
+
 - JSON output for tracking
 
-**Usage:**
-```bash
+# Complete suite with iterations
+
+python scripts/benchmark.py --type all --runs 3**Usage:**
+
+``````bash
+
 # Performance tests
-python scripts/benchmark.py --type performance
+
+### benchmark_full.py (13 KB)python scripts/benchmark.py --type performance
+
+**Extended benchmark with unlimited token generation**
 
 # Quality tests
-python scripts/benchmark.py --type quality
+
+### generate_report.py (8 KB)python scripts/benchmark.py --type quality
+
+**Markdown report generator from benchmark JSON**
 
 # Complete suite
-python scripts/benchmark.py --type all --runs 3
+
+### test_benchmark.py (6 KB)python scripts/benchmark.py --type all --runs 3
+
+**Quick 3-request benchmark for rapid testing**
 
 # Specific model
-python scripts/benchmark.py --model <model_name>
+
+---python scripts/benchmark.py --model <model_name>
+
 ```
 
-**`test_benchmark.py`** (5.8KB)
-- Quick benchmark validation
-- Runs 3 simple inference requests
-- Fast performance check (~30 seconds)
+## Performance Results
 
-**Usage:**
+**`test_benchmark.py`** (5.8KB)
+
+See **[BENCHMARKS.md](../BENCHMARKS.md)** for complete benchmark results and analysis.- Quick benchmark validation
+
+- Runs 3 simple inference requests
+
+**Quick Summary:**- Fast performance check (~30 seconds)
+
+- Qwen3-0.6B: 15.59 tok/s ⭐
+
+- With binary cache: 75ms TTFT (23.5x faster!) 🔥**Usage:**
+
 ```bash
 python scripts/test_benchmark.py
 ```

@@ -1,204 +1,157 @@
 # RockchipLlama
 
-A Docker-centric REST API server designed to be OpenAI/Ollama compliant, specifically optimized for Rockchip RK3588 and other RKNN-LLM based chips running on ARM architecture.
+OpenAI-compatible REST API server optimized for Rockchip RK3588 NPU, delivering production-ready LLM inference on ARM hardware.
 
 ## Overview
 
-This project provides a REST API server that leverages Rockchip's Neural Processing Unit (NPU) capabilities for efficient large language model inference. The server is designed to be compatible with OpenAI and Ollama API specifications, allowing seamless integration with existing applications.
+FastAPI server leveraging Rockchip's Neural Processing Unit (NPU) for efficient large language model inference. Compatible with OpenAI and Ollama API specifications for seamless integration with existing applications.
 
-## Target Platform
+## Key Features
 
-- **Architecture**: ARM64
-- **Primary Target**: Rockchip RK3588
-- **Compatible Chips**: Other RKNN-LLM based Rockchip SoCs
-- **Requirements**: Proper NPU drivers installed and NPU detection capability
-
-## Project Status
-
-✅ **Phase 3 Complete** - Real RKLLM Integration + Production Validation  
-🎉 **Phase 4.1 Complete** - Binary Prompt Caching Working!  
-🚀 **Repository Optimized** - Git history cleaned (4.6GB → 391MB)
-
-**Completed:**
-- ✅ FastAPI server with OpenAI API compatibility
-- ✅ Real RKLLM ctypes bindings with NPU inference
-- ✅ **Friendly model names**: `qwen3-4b`, `qwen3-0.6b`, `gemma3-1b`
-- ✅ **Dynamic context detection**: Automatically extracts from filename (4K-16K)
-- ✅ **Automatic model swapping**: Unloads old model when loading new one
-- ✅ Comprehensive benchmarking suite with accurate RKLLM perf stats
-- ✅ Configurable inference parameters via `config/inference_config.json`
-- ✅ Smart model loading (skips reload if same model)
-- ✅ GPU acceleration + 4-thread big core optimization (RK3588)
-- ✅ Production viability assessment (0.6B-1.5B sweet spot)
-- ✅ **Binary Prompt Caching**: RKLLM native NPU state caching - **23.5x FASTER!**
-
-**Phase 4.1 Achievement - Binary Cache Working! 🎉**
-- ✅ **CRITICAL FIX**: Corrected RKLLMPromptCacheParam structure to match official API
-  - **Root Cause**: Wrong field order + extra non-existent field caused segfault
-  - **Solution**: Checked official rkllm.h header and examples
-  - **Result**: Cache creation now works perfectly!
-- ✅ **Cache Creation**: 33MB binary cache files successfully generated
-- ✅ **Cache Loading**: NPU state restoration working perfectly
-- ✅ **Performance**: TTFT reduced from 1775ms to 75.2ms (95.8% improvement!)
-- ✅ **Real-world Impact**: 1326-char system prompt now loads in 75ms instead of 1.8s
-
-**Repository Optimization:**
-- ✅ Git history cleaned: Removed 5GB model file from history
-- ✅ Push size reduced: 4.14 GB → 311 KB (99.99% reduction!)
-- ✅ .gitignore updated: Models, caches, and venv properly excluded
-- ✅ Fast clones: Repository now ~300 KB (code only)
-
-**Phase 4 Next Goals:**
-- ⏳ **Multi-Batch Inference**: 2-3x throughput improvement under load
-- ⏳ **LongRoPE Support**: 32K-64K context windows (requires RKLLM 1.2.2 upgrade)
-
-**Benchmark Results (RK3588 NPU @ Max Frequency):**
-- ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM - **RECOMMENDED** (Best balance)
-- ✅ **Qwen3-0.6B + Binary Cache**: **TTFT 75.2ms** (was 1775ms) - **23.5x faster prefill!**
-- ✅ **Gemma3-1B**: 13.50 tokens/sec, 4K context, 1243 MB RAM - **USABLE** (Needs 16K reconversion)
-- ⚠️ **Qwen3-4B**: 3.13 tokens/sec, 16K context, 5027 MB RAM - **TOO SLOW** (Production requires ≥5 tok/s)
-- ❌ **Gemma3-270m**: ~~29.80 tokens/sec~~ - **REMOVED** (produces garbage output)
-
-**Production Requirements:**
-- Minimum viable speed: **5 tokens/sec** for acceptable UX
-- Current hardware (RK3588 @ max freq): Best for 0.5B-1.5B models
-- Qwen3-4B excellent quality but too slow for production use
-
-**Hardware Status:**
-- ✅ NPU: 1.0 GHz (max frequency)
-- ✅ CPU Big Cores: 2.3 GHz (max frequency)
-- ✅ GPU: 1.0 GHz (max frequency)
-- ✅ Already optimized with frequency locking script
-
-**Next Enhancements:**
-- 🚀 **Phase 4.1**: Prompt caching (50-70% TTFT reduction)
-- 🚀 **Phase 4.2**: Multi-batch inference (2-3x throughput gain)
-- 🚀 **Phase 4.3**: LongRoPE for 32K-64K contexts
-
-**Current Focus:**
-- ✅ **Phase 4.1**: Binary prompt caching - **COMPLETE AND WORKING!**
-- ⏳ **Phase 4.2**: Multi-batch inference for throughput
-- ⏳ **Phase 4.3**: LongRoPE support for extended contexts
-
-**Next Enhancements:**
-- 🎉 **Phase 4.1 COMPLETE**: Binary prompt caching - **23.5x TTFT improvement achieved!**
-- ⏳ **Phase 4.2**: Multi-batch inference (2-3x throughput under concurrent load)
-- ⏳ **Phase 4.3**: LongRoPE support for >16K contexts (requires RKLLM 1.2.2 upgrade)
-- ⏳ Multi-instance model serving
-
-## Repository Structure
-
-```
-├── config/                        # Configuration files (PROJECT ROOT)
-│   ├── inference_config.json      # RKLLM inference parameters
-│   └── settings.py                # Server configuration
-├── src/
-│   ├── main.py                    # FastAPI application entry point
-│   ├── api/
-│   │   ├── openai_routes.py       # OpenAI-compatible endpoints
-│   │   ├── model_routes.py        # Model management API
-│   │   └── schemas.py             # Pydantic data models
-│   ├── models/
-│   │   ├── model_manager.py       # Singleton model lifecycle manager
-│   │   └── rkllm_model.py         # RKLLM runtime wrapper (real NPU)
-├── docs/
-│   ├── copilot.md                 # Design document + session notes
-│   ├── BENCHMARKING.md            # Comprehensive benchmarking guide
-│   ├── benchmark_prompts.json     # Test prompts for benchmarking
-│   └── rkllm.md                   # RKLLM documentation
-├── models/                        # Directory for .rkllm model files
-├── scripts/                       # Test and benchmark scripts
-│   ├── benchmark.py               # Full benchmark suite
-│   ├── test_benchmark.py          # Quick benchmark test
-│   ├── test_api.py                # API endpoint tests
-│   └── test_model_management.py   # Model management tests
-├── start_server.sh                # Server startup script
-├── requirements.txt               # Python dependencies
-├── QUICKSTART.md                  # Quick start guide
-├── MODEL_MANAGEMENT.md            # Model management documentation
-└── README.md                      # This file
-```
+✅ **Production Ready** - 15.59 tok/s with Qwen3-0.6B  
+🔥 **Binary Caching** - 23.5x faster TTFT (1775ms → 75ms)  
+� **OpenAI Compatible** - Drop-in replacement for OpenAI API  
+🚀 **NPU Accelerated** - Real RKLLM runtime integration  
+📦 **Model Management** - Dynamic loading with friendly names  
+⚙️ **Configurable** - Runtime parameter tuning without restart  
 
 ## Quick Start
 
-### 1. Setup Environment
-
 ```bash
-# Create virtual environment
+# 1. Setup
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
+
+# 2. Start server
+./start_server.sh
+
+# 3. Load model & chat
+curl -X POST http://localhost:8080/v1/models/load \
+  -d '{"model": "qwen3-0.6b"}'
+
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -d '{
+    "model": "qwen3-0.6b",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
 ```
 
-### 2. Start Server
+Server available at: http://localhost:8080  
+Interactive docs: http://localhost:8080/docs
+
+## Performance
+
+**📊 [See Full Benchmarks →](BENCHMARKS.md)**
+
+| Model | Tokens/sec | TTFT | Memory | Status |
+|-------|------------|------|--------|--------|
+| Qwen3-0.6B | **15.59** | 295ms | 890 MB | ⭐ **RECOMMENDED** |
+| Qwen3-0.6B + Cache | - | **75ms** | - | 🔥 **23.5x faster!** |
+| Gemma3-1B | 13.50 | 339ms | 1243 MB | ✅ USABLE |
+
+Binary caching reduces Time To First Token by **95.8%** for repeated prompts!
+
+## Project Status
+
+**✅ Phase 4.1 Complete** - Binary Prompt Caching (23.5x speedup achieved)
+
+**Next Steps:**
+- Phase 4.2: Multi-batch inference (2-3x throughput)
+- Phase 4.3: LongRoPE support (32K-64K context)
+
+---
+
+## API Reference
+
+### Chat Completions (OpenAI Compatible)
 
 ```bash
-./start_server.sh
-# Or manually:
-# cd src && uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+POST /v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "qwen3-0.6b",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant"},
+    {"role": "user", "content": "Hello!"}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 512
+}
 ```
 
-Server will be available at:
-- API: http://localhost:8080
-- Interactive docs: http://localhost:8080/docs
-- Health check: http://localhost:8080/v1/health
+**With Binary Cache (23.5x faster!):**
+```bash
+# 1. Create cache once
+POST /v1/cache/qwen3-0.6b
+{"cache_name": "system", "prompt": "You are a coding assistant..."}
 
-### 3. Load a Model
+# 2. Use in every request
+POST /v1/chat/completions
+{
+  "model": "qwen3-0.6b",
+  "use_cache": "system",  # ← 75ms vs 1775ms!
+  "messages": [{"role": "user", "content": "Help me code"}]
+}
+```
+
+### Model Management
 
 ```bash
 # List available models
-curl http://localhost:8080/v1/models/available
+GET /v1/models/available
 
-# Load a model (recommended: qwen3-0.6b)
-curl -X POST http://localhost:8080/v1/models/load \
-  -H 'Content-Type: application/json' \
-  -d '{"model": "qwen3-0.6b"}'
+# Load model
+POST /v1/models/load
+{"model": "qwen3-0.6b"}
+
+# Get loaded model
+GET /v1/models/loaded
+
+# Unload model
+POST /v1/models/unload
 ```
 
-### 4. Run Inference
+### Cache Management
 
 ```bash
-# Basic inference
-curl -X POST http://localhost:8080/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "current",
-    "messages": [{"role": "user", "content": "Explain quantum computing"}],
-    "temperature": 0.7,
-    "max_tokens": 512
-  }'
+# Create binary cache
+POST /v1/cache/{model}
+{"cache_name": "system", "prompt": "..."}
 
-# With prompt caching (single cache)
-curl -X POST http://localhost:8080/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "current",
-    "messages": [{"role": "user", "content": "Write a Python function"}],
-    "cache_prompts": "coding_rules"
-  }'
+# List caches
+GET /v1/cache/{model}
 
-# With multiple caches
-curl -X POST http://localhost:8080/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "current",
-    "messages": [{"role": "user", "content": "Refactor this code"}],
-    "cache_prompts": ["coding_rules", "project_context"]
-  }'
-
-# Or use the OpenAI Python client
-python -c "
-from openai import OpenAI
-client = OpenAI(base_url='http://localhost:8080/v1', api_key='dummy')
-response = client.chat.completions.create(
-    model='current',
-    messages=[{'role': 'user', 'content': 'Hello!'}]
-)
-print(response.choices[0].message.content)
-"
+# Delete cache
+DELETE /v1/cache/{model}/{cache_name}
 ```
+
+### OpenAI Python Client
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url='http://localhost:8080/v1',
+    api_key='dummy'  # Not required but OpenAI client needs something
+)
+
+# Chat completion
+response = client.chat.completions.create(
+    model='qwen3-0.6b',
+    messages=[
+        {'role': 'system', 'content': 'You are a helpful assistant'},
+        {'role': 'user', 'content': 'Explain quantum computing'}
+    ],
+    temperature=0.7,
+    max_tokens=512
+)
+
+print(response.choices[0].message.content)
+```
+
+---
 
 ### 5. Manage Prompt Caches (Binary NPU Caching)
 
@@ -244,114 +197,75 @@ curl http://localhost:8080/v1/cache/qwen3-0.6b
 curl -X DELETE http://localhost:8080/v1/cache/qwen3-0.6b/system
 ```
 
-**Performance Impact:**
-- **Without cache**: 1775ms TTFT (full prefill)
-- **With cache**: 75.2ms TTFT (NPU state restored)
-- **Speedup**: 23.5x faster (95.8% reduction!)
-- **Cache size**: ~33MB per 1300-char prompt
-
-### 6. Run Benchmarks
-
-```bash
-# Quick test (3 requests)
-python scripts/test_benchmark.py
-
-# Full performance benchmark (5 prompts)
-python scripts/benchmark.py --type performance
-
-# Quality assessment (5 detailed prompts)
-python scripts/benchmark.py --type quality
-
-# Complete suite with multiple runs
-python scripts/benchmark.py --type all --runs 3
-```
-
 ## Configuration
 
-### Inference Parameters
+Runtime configuration without server restart!
 
-Edit `config/inference_config.json` to customize RKLLM inference parameters:
-
+**Inference Parameters** (`config/inference_config.json`):
 ```json
 {
   "inference_params": {
-    "top_k": 20,              // Top-K sampling (1=greedy, higher=more random)
-    "top_p": 0.95,            // Nucleus sampling (0.9 standard)
-    "temperature": 0.6,       // Lower=focused, higher=creative
-    "repeat_penalty": 0.9,    // <1.0=less repetition, >1.0=penalize repetition
-    "frequency_penalty": 0.6,
-    "presence_penalty": 0.1
+    "top_k": 20,
+    "top_p": 0.95,
+    "temperature": 0.6,
+    "repeat_penalty": 0.9
   },
   "hardware": {
-    "num_npu_cores": 3,       // RK3588 has 3 NPU cores
-    "enabled_cpus_mask": 240, // 0xF0 = big cores 4-7
+    "num_npu_cores": 3,
+    "enabled_cpus_mask": 240,  // 0xF0 = big cores 4-7
     "num_threads": 4
   }
 }
 ```
 
-**No server restart needed** - parameters are loaded when a model is loaded.
-
-### Server Configuration
-
-Edit `config/settings.py` or create `.env` file:
-
+**Server Settings** (`config/settings.py` or `.env`):
 ```bash
-# Server settings
 HOST=0.0.0.0
 PORT=8080
-LOG_LEVEL=info
-
-# Model settings
 MODELS_DIR=./models
-DEFAULT_MODEL=Qwen_Qwen3-0.6B-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm
-
-# RKLLM settings
 RKLLM_LIB_PATH=/usr/lib/librkllmrt.so
-MAX_CONTEXT_LEN=512
-MAX_NEW_TOKENS=512
-NUM_NPU_CORE=3
 ```
+
+---
+
+## Hardware Requirements
+
+- **Platform:** ARM64 (Rockchip RK3588 or compatible)
+- **NPU Drivers:** RKNN-LLM runtime library installed
+- **Memory:** 2GB+ RAM (4GB recommended for larger models)
+- **Storage:** 1-5GB per model + cache storage
+
+**Tested On:**
+- Orange Pi 5 Max (RK3588)
+- NPU @ 1.0 GHz, CPU @ 2.3 GHz
+- RKLLM 1.2.1
+
+---
 
 ## Documentation
 
-📚 **[Documentation Index](docs/DOCUMENTATION_INDEX.md)** - Complete overview of all documentation
+- 📊 **[BENCHMARKS.md](BENCHMARKS.md)** - Performance results & comparisons
+- 📖 **[docs/copilot.md](docs/copilot.md)** - Full changelog & design notes
+- 🔧 **[docs/rkllm.md](docs/rkllm.md)** - RKLLM technical reference
 
-### User Guides
-- **[docs/QUICKSTART.md](docs/QUICKSTART.md)** - Detailed getting started guide
-- **[docs/MODEL_MANAGEMENT.md](docs/MODEL_MANAGEMENT.md)** - Model lifecycle management
-- **[docs/CACHE_USAGE_GUIDE.md](docs/CACHE_USAGE_GUIDE.md)** - Prompt caching guide
-- **[docs/BENCHMARKING.md](docs/BENCHMARKING.md)** - Performance benchmarking guide
-- **[docs/BENCHMARK_QUICKREF.md](docs/BENCHMARK_QUICKREF.md)** - Quick reference for benchmarks
+---
 
-### Technical Documentation
-- **[docs/rkllm.md](docs/rkllm.md)** - RKLLM runtime documentation
-- **[docs/copilot.md](docs/copilot.md)** - Design document and session notes
+## Repository Structure
 
-## Performance Expectations (RK3588)
+```
+├── src/                  # FastAPI application
+│   ├── api/              # API routes (OpenAI compatible)
+│   └── models/           # Model management & RKLLM wrapper
+├── config/               # Configuration files
+├── models/               # .rkllm model files (gitignored)
+├── cache/                # Binary cache files (gitignored)
+├── scripts/              # Benchmark & test scripts
+├── benchmarks/           # Benchmark results & reports
+├── docs/                 # Documentation
+└── BENCHMARKS.md         # Performance results
+```
 
-Based on RKNN-LLM benchmarks for w8a8 models:
-
-| Model | Size | TTFT | Tokens/sec | Memory |
-|-------|------|------|------------|--------|
-| MiniCPM4 | 0.5B | 128ms | 45.13 | 525 MB |
-| Qwen2 | 0.5B | 144ms | 42.58 | 654 MB |
-| Qwen3 | 0.6B | 214ms | 32.16 | 774 MB |
-| TinyLLAMA | 1.1B | 239ms | 24.49 | 1085 MB |
-| Qwen2.5 | 1.5B | 412ms | 16.32 | 1659 MB |
-
-Use the benchmark tools to measure actual performance on your hardware.
-
-## Getting Started
-
-See [docs/QUICKSTART.md](docs/QUICKSTART.md) for detailed setup and usage instructions.
-
-## External Dependencies
-
-The project will integrate with external repositories containing:
-- Rockchip NPU drivers
-- RKNN runtime libraries
-- Reference examples and implementations
+---
 
 ## License
 
@@ -359,4 +273,4 @@ The project will integrate with external repositories containing:
 
 ## Contributing
 
-[Contributing guidelines to be added]
+Issues and pull requests welcome! This project demonstrates production-ready NPU-accelerated LLM inference on edge hardware.
