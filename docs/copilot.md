@@ -720,6 +720,8 @@ ALWAYS check official examples when ctypes bindings fail. Structure field order 
 - `src/models/rkllm_model.py` - Corrected RKLLMPromptCacheParam structure
 - `docs/CACHE_BUG_FIX.md` - Detailed root cause analysis
 - `docs/RKLLM_CACHE_BUG_INVESTIGATION.md` - Investigation journey
+- `docs/DISK_USAGE_ANALYSIS.md` - Repository size breakdown
+- `docs/GIT_CLEANUP_SUCCESS.md` - Git history cleanup documentation
 
 **Performance Achievement:**
 - Without cache: 1775ms TTFT (full prefill)
@@ -727,7 +729,24 @@ ALWAYS check official examples when ctypes bindings fail. Structure field order 
 - Improvement: 95.8% reduction (23.5x speedup!)
 - Cache size: 33MB for 1326-char system prompt
 
-**Status:** Phase 4.1 Binary Caching - **COMPLETE AND WORKING!** 🎉
+**Repository Cleanup Achievement:**
+- Removed 5GB model file from git history using git filter-branch
+- .git size: 4.6 GB → 391 MB (mostly submodule, only 314 KB actual code)
+- Pack size: 4.14 GB → 314 KB (99.99% reduction!)
+- Push size: 311 KB (instead of 4.14 GB!)
+- Updated .gitignore: Added `*.rkllm`, `*.rkllm_cache` patterns
+- Fast clones: Repository now lightweight and efficient
+
+**Commits Made:**
+- `6dd4181` - fix: Correct RKLLMPromptCacheParam structure to match official API
+- `857bf51` - fix: Add overwrite protection + document RKLLM segfault bug
+- `5ebab0e` - chore: Update .gitignore to exclude binary cache files
+- `0e7e61a` - docs: Add git repository size analysis and cleanup documentation
+- `6d3e550` - docs: Document successful git history cleanup (4.6GB → 391MB)
+- `318425a` - docs: Celebrate Phase 4.1 completion - Binary caching working!
+
+**Status:** Phase 4.1 Binary Caching - **COMPLETE AND WORKING!** 🎉  
+**Status:** Repository Optimization - **COMPLETE!** Ready for fast distribution.
 
 ---
 

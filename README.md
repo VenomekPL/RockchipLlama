@@ -15,8 +15,9 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 
 ## Project Status
 
-✅ **Phase 3 Complete** - Real RKLLM Integration + Production Validation
-🎉 **Phase 4.1 Complete** - Binary Prompt Caching Working!
+✅ **Phase 3 Complete** - Real RKLLM Integration + Production Validation  
+🎉 **Phase 4.1 Complete** - Binary Prompt Caching Working!  
+🚀 **Repository Optimized** - Git history cleaned (4.6GB → 391MB)
 
 **Completed:**
 - ✅ FastAPI server with OpenAI API compatibility
@@ -33,14 +34,23 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 
 **Phase 4.1 Achievement - Binary Cache Working! 🎉**
 - ✅ **CRITICAL FIX**: Corrected RKLLMPromptCacheParam structure to match official API
+  - **Root Cause**: Wrong field order + extra non-existent field caused segfault
+  - **Solution**: Checked official rkllm.h header and examples
+  - **Result**: Cache creation now works perfectly!
 - ✅ **Cache Creation**: 33MB binary cache files successfully generated
 - ✅ **Cache Loading**: NPU state restoration working perfectly
 - ✅ **Performance**: TTFT reduced from 1775ms to 75.2ms (95.8% improvement!)
 - ✅ **Real-world Impact**: 1326-char system prompt now loads in 75ms instead of 1.8s
 
+**Repository Optimization:**
+- ✅ Git history cleaned: Removed 5GB model file from history
+- ✅ Push size reduced: 4.14 GB → 311 KB (99.99% reduction!)
+- ✅ .gitignore updated: Models, caches, and venv properly excluded
+- ✅ Fast clones: Repository now ~300 KB (code only)
+
 **Phase 4 Next Goals:**
-- 🔄 **Multi-Batch Inference**: 2-3x throughput improvement under load
-- 🔄 **LongRoPE Support**: 32K-64K context windows (requires RKLLM 1.2.2 upgrade)
+- ⏳ **Multi-Batch Inference**: 2-3x throughput improvement under load
+- ⏳ **LongRoPE Support**: 32K-64K context windows (requires RKLLM 1.2.2 upgrade)
 
 **Benchmark Results (RK3588 NPU @ Max Frequency):**
 - ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM - **RECOMMENDED** (Best balance)
@@ -66,7 +76,7 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 - 🚀 **Phase 4.3**: LongRoPE for 32K-64K contexts
 
 **Current Focus:**
-- ✅ **Phase 4.1**: Prompt caching system - **COMPLETE**
+- ✅ **Phase 4.1**: Binary prompt caching - **COMPLETE AND WORKING!**
 - ⏳ **Phase 4.2**: Multi-batch inference for throughput
 - ⏳ **Phase 4.3**: LongRoPE support for extended contexts
 
