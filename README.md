@@ -42,7 +42,7 @@ Interactive docs: http://localhost:8080/docs
 
 ## Performance
 
-**📊 [See Full Benchmarks →](BENCHMARKS.md)**
+**📊 [See Full Benchmarks →](docs/BENCHMARKS.md)**
 
 | Model | Tokens/sec | TTFT | Memory | Status |
 |-------|------------|------|--------|--------|
@@ -247,11 +247,11 @@ RKLLM_LIB_PATH=/usr/lib/librkllmrt.so
 
 ## Documentation
 
-- 📊 **[BENCHMARKS.md](BENCHMARKS.md)** - Performance results & comparisons
-- 📖 **[docs/copilot.md](docs/copilot.md)** - Full changelog & design notes
-- 🔧 **[docs/rkllm.md](docs/rkllm.md)** - RKLLM technical reference
-- 🎯 **[docs/longrope_guide.md](docs/longrope_guide.md)** - LongRoPE (extended context) implementation guide
+- 📊 **[docs/BENCHMARKS.md](docs/BENCHMARKS.md)** - Performance results & comparisons
+- 🎯 **[docs/longrope_guide.md](docs/longrope_guide.md)** - LongRoPE (extended context) guide
 - 🏗️ **[docs/queue_architecture.md](docs/queue_architecture.md)** - Queue-based concurrency design
+- 🔧 **[docs/rkllm.md](docs/rkllm.md)** - RKLLM technical reference
+- 📖 **[docs/copilot.md](docs/copilot.md)** - Full changelog & design notes
 
 ---
 
