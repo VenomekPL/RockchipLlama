@@ -180,8 +180,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
                 media_type="text/event-stream"
             )
         
-        # Non-streaming response - use loaded model
-        generated_text, perf_stats = current_model.generate(
+        # Non-streaming response - use loaded model with async batching
+        generated_text, perf_stats = await current_model.generate_async(
             prompt=prompt,
             max_new_tokens=request.max_tokens or 512,
             temperature=request.temperature or 0.8,
@@ -277,7 +277,7 @@ async def stream_chat_completion(
             return
         
         # Generate with streaming (this will fill chunk_buffer via callback)
-        _, perf_stats = current_model.generate(
+        _, perf_stats = await current_model.generate_async(
             prompt=prompt,
             max_new_tokens=request.max_tokens or 512,
             temperature=request.temperature or 0.8,
@@ -372,7 +372,7 @@ async def create_completion(request: CompletionRequest):
             )
         
         # Non-streaming response
-        generated_text, perf_stats = current_model.generate(
+        generated_text, perf_stats = await current_model.generate_async(
             prompt=request.prompt,
             max_new_tokens=request.max_tokens or 512,
             temperature=request.temperature or 0.8,
@@ -663,7 +663,7 @@ async def generate_cache(
         
         # Generate binary cache by running inference with save_binary_cache=True
         start_time = time.time()
-        _, perf_stats = current_model.generate(
+        _, perf_stats = await current_model.generate_async(
             prompt=prompt,
             max_new_tokens=1,  # Minimal generation, we just need the prefill cache
             binary_cache_path=binary_cache_path,

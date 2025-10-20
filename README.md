@@ -54,11 +54,13 @@ Binary caching reduces Time To First Token by **95.8%** for repeated prompts!
 
 ## Project Status
 
-**✅ Phase 4.1 Complete** - Binary Prompt Caching (23.5x speedup achieved)
+**✅ Phase 4.1 Complete** - Binary Prompt Caching (23.5x speedup achieved)  
+**✅ Queue-Based Concurrency** - Stable concurrent request handling with n_batch=1
 
 **Next Steps:**
-- Phase 4.2: Multi-batch inference (2-3x throughput)
 - Phase 4.3: LongRoPE support (32K-64K context)
+- Phase 4.4: HuggingFace integration
+- Phase 4.5: Ollama API compatibility
 
 ---
 

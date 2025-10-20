@@ -5,6 +5,7 @@ Handles RKLLM runtime integration and inference using actual ctypes bindings
 import ctypes
 import os
 import logging
+import asyncio
 from typing import Optional, Callable, List
 from pathlib import Path
 import threading
@@ -160,6 +161,12 @@ class RKLLMModel:
     _callback_lock = threading.Lock()
     _unloading = False
     
+    # Phase 4.2: Multi-batch inference semaphore
+    # Limits concurrent inference requests to match n_batch parameter
+    # NOTE: This will be updated in load() based on config n_batch value
+    _batch_semaphore = None  # Initialized in load()
+    _batch_size = 1  # Current n_batch value
+    
     def __init__(self, model_path: str, lib_path: str = "/usr/lib/librkllmrt.so"):
         """
         Initialize RKLLM model
@@ -241,18 +248,21 @@ class RKLLMModel:
             logger.info(f"  Max context: {max_context_len}, NPU cores: {num_npu_core}")
             
             # Get config params
+            model_defaults = inference_config['model_defaults']
             inf_params = inference_config['inference_params']
             hw_params = inference_config['hardware']
             
-            logger.info(f"  Using config: top_k={inf_params['top_k']}, repeat_penalty={inf_params['repeat_penalty']}")
+            logger.info(f"  Using config: top_k={inf_params['top_k']}, repeat_penalty={inf_params['repeat_penalty']}, n_batch={hw_params['n_batch']}")
             
             # Create parameters
             rkllm_param = RKLLMParam()
             rkllm_param.model_path = self.model_path.encode('utf-8')
-            rkllm_param.max_context_len = inf_params.get('max_context_len', max_context_len)
-            rkllm_param.max_new_tokens = inf_params.get('max_new_tokens', 4096)
-            rkllm_param.skip_special_token = inf_params.get('skip_special_token', True)
-            rkllm_param.n_keep = -1
+            
+            # Model defaults - from config
+            rkllm_param.max_context_len = model_defaults.get('max_context_len', max_context_len)
+            rkllm_param.max_new_tokens = model_defaults.get('max_new_tokens', 4096)
+            rkllm_param.skip_special_token = model_defaults.get('skip_special_token', True)
+            rkllm_param.n_keep = model_defaults.get('n_keep', -1)
             
             # Sampling parameters - from config file
             rkllm_param.top_k = inf_params['top_k']
@@ -268,21 +278,28 @@ class RKLLMModel:
             rkllm_param.mirostat_eta = inf_params.get('mirostat_eta', 0.1)
             
             # Async mode - from config
-            rkllm_param.is_async = inf_params.get('is_async', False)
+            rkllm_param.is_async = model_defaults.get('is_async', False)
             
             # Image parameters (empty for text-only)
             rkllm_param.img_start = b""
             rkllm_param.img_end = b""
             rkllm_param.img_content = b""
             
-            # Extended parameters - from config
-            rkllm_param.extend_param.base_domain_id = 0
-            rkllm_param.extend_param.embed_flash = 1  # Store embeddings in flash
-            rkllm_param.extend_param.n_batch = 1
-            rkllm_param.extend_param.use_cross_attn = 0
-            rkllm_param.extend_param.enabled_cpus_num = hw_params.get('num_threads', 4)
-            # Use CPU mask from config (default: RK3588 big cores 4-7)
+            # Extended parameters - ALL from config now!
+            rkllm_param.extend_param.base_domain_id = hw_params.get('base_domain_id', 0)
+            rkllm_param.extend_param.embed_flash = hw_params.get('embed_flash', 1)
+            n_batch = hw_params.get('n_batch', 3)
+            rkllm_param.extend_param.n_batch = n_batch
+            rkllm_param.extend_param.use_cross_attn = hw_params.get('use_cross_attn', 0)
+            rkllm_param.extend_param.enabled_cpus_num = hw_params.get('enabled_cpus_num', 4)
             rkllm_param.extend_param.enabled_cpus_mask = hw_params.get('enabled_cpus_mask', 0xF0)
+            
+            # Initialize batch semaphore based on n_batch from config
+            if RKLLMModel._batch_semaphore is None or RKLLMModel._batch_size != n_batch:
+                RKLLMModel._batch_size = n_batch
+                RKLLMModel._batch_semaphore = asyncio.Semaphore(n_batch)
+                logger.info(f"📊 Batch semaphore initialized: {n_batch} concurrent slots")
+
             
             # Create callback
             callback_type = ctypes.CFUNCTYPE(
@@ -413,8 +430,17 @@ class RKLLMModel:
             else:
                 infer_params.prompt_cache_params = None
             
-            # Run inference
-            rkllm_run = self.lib.rkllm_run
+            # Run inference - use async if configured
+            from config.settings import inference_config
+            is_async_mode = inference_config['model_defaults'].get('is_async', False)
+            
+            if is_async_mode:
+                logger.debug("🔄 Using rkllm_run_async (non-blocking)")
+                rkllm_run = self.lib.rkllm_run_async
+            else:
+                logger.debug("🔒 Using rkllm_run (blocking)")
+                rkllm_run = self.lib.rkllm_run
+            
             rkllm_run.argtypes = [
                 RKLLM_Handle_t, 
                 ctypes.POINTER(RKLLMInput), 
@@ -431,7 +457,19 @@ class RKLLMModel:
             )
             
             if ret != 0:
-                raise RuntimeError(f"rkllm_run failed with code: {ret}")
+                raise RuntimeError(f"rkllm_run(_async) failed with code: {ret}")
+            
+            # If async mode, wait for completion
+            if is_async_mode:
+                import time
+                rkllm_is_running = self.lib.rkllm_is_running
+                rkllm_is_running.argtypes = [RKLLM_Handle_t]
+                rkllm_is_running.restype = ctypes.c_int
+                
+                logger.debug("⏳ Waiting for async inference to complete...")
+                while rkllm_is_running(self.handle) == 0:  # 0 = still running
+                    time.sleep(0.001)  # Poll every 1ms
+                logger.debug("✅ Async inference complete")
             
             # Log binary cache result
             if binary_cache_path and save_binary_cache:
@@ -451,6 +489,58 @@ class RKLLMModel:
         except Exception as e:
             logger.error(f"Generation failed: {e}", exc_info=True)
             raise
+    
+    async def generate_async(
+        self,
+        prompt: str,
+        max_new_tokens: int = 512,
+        temperature: float = 0.8,
+        top_p: float = 0.9,
+        top_k: int = 20,
+        repeat_penalty: float = 1.1,
+        callback: Optional[Callable[[str], None]] = None,
+        binary_cache_path: Optional[str] = None,
+        save_binary_cache: bool = False
+    ) -> tuple[str, Optional[dict]]:
+        """
+        Async wrapper for generate() with batch slot queueing
+        
+        Phase 4.2: Multi-batch inference with automatic queuing.
+        Limits concurrent requests to n_batch (configurable, default 3 for RK3588).
+        Requests beyond n_batch are automatically queued and processed as slots free.
+        
+        Args: Same as generate()
+        
+        Returns: Same as generate() - (Generated text, performance stats dict)
+        """
+        # Ensure semaphore is initialized (should be done in load(), but safety check)
+        if self._batch_semaphore is None:
+            raise RuntimeError("Model not loaded. Call load() first to initialize batch semaphore.")
+        
+        # Acquire batch slot (auto-queues if all slots busy)
+        async with self._batch_semaphore:
+            # Log queue depth if waiting
+            waiting = self._batch_size - self._batch_semaphore._value
+            if waiting > 0:
+                logger.info(f"📊 Batch slots: {waiting}/{self._batch_size} active")
+            
+            # Run synchronous generate in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,  # Use default executor
+                lambda: self.generate(
+                    prompt=prompt,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    repeat_penalty=repeat_penalty,
+                    callback=callback,
+                    binary_cache_path=binary_cache_path,
+                    save_binary_cache=save_binary_cache
+                )
+            )
+            return result
     
     def unload(self):
         """Unload model and free NPU resources

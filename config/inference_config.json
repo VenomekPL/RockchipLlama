@@ -1,8 +1,11 @@
 {
-  "description": "RKLLM inference parameters configuration",
+  "description": "RKLLM inference parameters configuration - all RKLLM runtime parameters",
   "model_defaults": {
     "max_context_len": 16384,
-    "max_new_tokens": 4096
+    "max_new_tokens": 16384,
+    "n_keep": -1,
+    "skip_special_token": true,
+    "is_async": true
   },
   "inference_params": {
     "top_k": 20,
@@ -11,23 +14,46 @@
     "repeat_penalty": 0.9,
     "frequency_penalty": 0.6,
     "presence_penalty": 0.1,
-    "mirostat": 0,
+    "mirostat": 2,
     "mirostat_tau": 5.0,
     "mirostat_eta": 0.1
   },
   "hardware": {
     "num_npu_cores": 3,
-    "enabled_cpus_num": 4,
-    "enabled_cpus_mask": 240,
     "base_domain_id": 0,
-    "embed_flash": 1,
-    "n_batch": 1
+    "embed_flash": 0,
+    "n_batch": 1,
+    "use_cross_attn": 0,
+    "enabled_cpus_num": 4,
+    "enabled_cpus_mask": 240
   },
   "notes": {
-    "top_k": "1 = greedy (most deterministic), -1 = disabled, higher = more random",
-    "top_p": "Nucleus sampling, 0.9 is standard",
-    "temperature": "0.8 is balanced, lower = more focused, higher = more creative",
-    "repeat_penalty": "0.9 = less repetition (< 1.0), 1.0 = no penalty, > 1.0 = penalize repetition",
-    "enabled_cpus_mask": "240 = 0xF0 = big cores 4-7 on RK3588"
+    "model_defaults": {
+      "max_context_len": "Maximum context window size (tokens)",
+      "max_new_tokens": "Maximum tokens to generate per request",
+      "n_keep": "Number of KV cache tokens to keep when shifting context (-1 = keep all)",
+      "skip_special_token": "Skip special tokens in output (true recommended)",
+      "is_async": "Use async inference mode (false = sync, managed by our wrapper)"
+    },
+    "inference_params": {
+      "top_k": "1 = greedy (most deterministic), -1 = disabled, higher = more random",
+      "top_p": "Nucleus sampling, 0.9 is standard",
+      "temperature": "0.8 is balanced, lower = more focused, higher = more creative",
+      "repeat_penalty": "0.9 = less repetition (< 1.0), 1.0 = no penalty, > 1.0 = penalize repetition",
+      "frequency_penalty": "Penalize frequently used tokens",
+      "presence_penalty": "Penalize tokens based on presence in input",
+      "mirostat": "Mirostat sampling (0 = disabled, 1/2 = enabled)",
+      "mirostat_tau": "Target entropy for Mirostat",
+      "mirostat_eta": "Learning rate for Mirostat"
+    },
+    "hardware": {
+      "num_npu_cores": "Number of NPU cores (RK3588 = 3, RK3576 = 6)",
+      "base_domain_id": "Memory domain ID (0 = default)",
+      "embed_flash": "Store embeddings in flash (1 = yes, 0 = no) - set to 0 to use RAM (faster)",
+      "n_batch": "Batch inference slots - KEEP AT 1 (batching broken in RKLLM, use queue instead)",
+      "use_cross_attn": "Enable cross-attention (0 = disabled, 1 = enabled for encoder-decoder models)",
+      "enabled_cpus_num": "Number of CPU threads for inference",
+      "enabled_cpus_mask": "CPU affinity mask (240 = 0xF0 = big cores 4-7 on RK3588)"
+    }
   }
 }
