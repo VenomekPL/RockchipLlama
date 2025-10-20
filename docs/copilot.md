@@ -294,7 +294,29 @@ RockchipLlama/
 - **Expected Impact**: 32K-64K context support (up from current 16K max)
 - **Blocked on**: Rockchip RKLLM 1.2.2 release
 
-#### 4.4: Ollama API Compatibility 🦙 (Universal Server)
+#### 4.4: Hugging Face Model Integration 🤗 (Auto-Download & Conversion)
+- [ ] Hugging Face Hub integration
+  - [ ] Install huggingface_hub library
+  - [ ] Implement model download from HF
+  - [ ] Support authentication for gated models
+  - [ ] Progress tracking for large downloads
+- [ ] Automatic model conversion
+  - [ ] Trigger RKLLM conversion after download
+  - [ ] Support common model architectures (Qwen, Gemma, Llama, etc.)
+  - [ ] Configurable conversion parameters (w8a8, context length, etc.)
+  - [ ] Error handling and validation
+- [ ] Model registry
+  - [ ] Database of supported HF models
+  - [ ] Model metadata (size, architecture, recommended settings)
+  - [ ] Version tracking
+- [ ] API endpoints
+  - [ ] POST /v1/models/download - Download and convert from HF
+  - [ ] GET /v1/models/registry - List supported HF models
+  - [ ] Progress tracking endpoint
+- **Goal**: One-click model deployment from Hugging Face
+- **Impact**: Users don't need manual model conversion
+
+#### 4.5: Ollama API Compatibility 🦙 (Universal Server)
 - [ ] Ollama API endpoint implementation
   - [ ] POST /api/generate - Text generation (Ollama format)
   - [ ] POST /api/chat - Chat completion (Ollama format)
@@ -320,7 +342,7 @@ RockchipLlama/
 - **Goal**: Universal local LLM server (OpenAI OR Ollama compatible)
 - **Impact**: Drop-in replacement for both OpenAI and Ollama servers
 
-#### 4.5: Embeddings API 📊 (Vector Support)
+#### 4.6: Embeddings API 📊 (Vector Support)
 - [ ] Embedding model support
   - [ ] Research RKLLM embedding model conversion
   - [ ] Convert small embedding model (e.g., all-MiniLM-L6-v2)
@@ -350,8 +372,9 @@ RockchipLlama/
   - ✅ 95.8% TTFT reduction validated
 - [ ] **Phase 4.2**: Multi-batch inference (2-3x throughput)
 - [ ] **Phase 4.3**: LongRoPE support (32K-64K context)
-- [ ] **Phase 4.4**: Ollama API compatibility (universal server)
-- [ ] **Phase 4.5**: Embeddings API (RAG support)
+- [ ] **Phase 4.4**: Hugging Face integration (auto-download & convert)
+- [ ] **Phase 4.5**: Ollama API compatibility (universal server)
+- [ ] **Phase 4.6**: Embeddings API (RAG support)
   - ✅ Comprehensive documentation (3 docs, 30KB)
   - ⏳ Binary cache generation (next: actual TTFT reduction)
 - ⏳ Multi-batch increases throughput by ≥2x under load
