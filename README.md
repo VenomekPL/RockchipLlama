@@ -20,7 +20,7 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 **Completed:**
 - ✅ FastAPI server with OpenAI API compatibility
 - ✅ Real RKLLM ctypes bindings with NPU inference
-- ✅ **Friendly model names**: `qwen3-0.6b`, `gemma3-270m`, `gemma3-1b`
+- ✅ **Friendly model names**: `qwen3-0.6b`, ~~`gemma3-270m`~~, `gemma3-1b`
 - ✅ **Dynamic context detection**: Automatically extracts from filename (4K-16K)
 - ✅ **Automatic model swapping**: Unloads old model when loading new one
 - ✅ Comprehensive benchmarking suite with accurate RKLLM perf stats
@@ -29,9 +29,9 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 - ✅ GPU acceleration + 4-thread big core optimization (RK3588)
 
 **Benchmark Results (RK3588 NPU):**
-- ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM
-- ✅ **Gemma3-270m**: 29.80 tokens/sec, 16K context, 602 MB RAM  
-- ✅ **Gemma3-1B**: 13.50 tokens/sec, 4K context, 1243 MB RAM
+- ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM - **RECOMMENDED**
+- ❌ **Gemma3-270m**: ~~29.80 tokens/sec~~ - **REMOVED** (produces garbage output)
+- ✅ **Gemma3-1B**: 13.50 tokens/sec, 4K context, 1243 MB RAM (needs 16K reconversion)
 
 **Current Focus:**
 - 🔄 Testing extended context capabilities (up to 16K)

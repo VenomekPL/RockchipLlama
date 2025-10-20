@@ -968,3 +968,33 @@ total_tokens_per_sec = (prefill_tokens + generate_tokens) / ((prefill_time_ms + 
 3. ⏳ Explore LongRoPE support (requires RKLLM 1.2.2)
 4. ⏳ Reconvert gemma3-1b with 16K context
 5. ⏳ Test multi-instance model serving
+
+#### Model Quality Issue - Gemma3-270m REMOVED (October 20, 2025)
+
+**Critical Finding:**
+- ✅ Gemma3-270m showed excellent performance metrics (29.80 tok/s, 602 MB)
+- ❌ **Output quality completely broken** - produces repetitive garbage
+- ❌ Gets stuck in repetition loops
+- ❌ Degrades into word salad ("Machine Machine Machine...")
+- ❌ 0/10 benchmark tests produced usable output
+
+**Example Failure:**
+Prompt: "Artificial intelligence and machine learning are revolutionizing..."
+Output: Repeats input 20+ times, then degrades to nonsense
+
+**Root Cause:**
+Likely poor w8a8 quantization or model conversion issues. Some models don't convert well to NPU.
+
+**Action Taken:**
+- ✅ Model file removed from /models/
+- ✅ Benchmarks moved to /benchmarks/removed/
+- ✅ Documentation updated to warn against this model
+- ✅ Created quality assessment: docs/MODEL_QUALITY_GEMMA3_270M_FAILURE.md
+
+**Lesson Learned:**
+**Speed metrics are meaningless if output is garbage.** Always validate quality, not just performance.
+
+**Current Working Models:**
+- ✅ **Qwen3-0.6B**: 15.59 tok/s, excellent quality - **RECOMMENDED**
+- ✅ **Gemma3-1B**: 13.50 tok/s, good quality (needs 16K reconversion)
+
