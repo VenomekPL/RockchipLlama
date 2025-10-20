@@ -168,17 +168,92 @@ RockchipLlama/
 - **Status**: Server running successfully on port 8080
 - **Next**: RKLLM runtime integration for real inference
 
-### Phase 3: RKLLM Runtime Integration (NEXT)
-- [ ] Study Flask reference implementation
-- [ ] Extract RKLLM ctypes bindings from Flask example
-- [ ] Implement rkllm_init() in rkllm_model.py
-- [ ] Implement rkllm_run() for inference
-- [ ] Add streaming callback support
-- [ ] Test with Gemma-3-270M model
-- [ ] Test with Qwen3-0.6B model
-- [ ] Performance benchmarking
+### Phase 3: RKLLM Runtime Integration (COMPLETED ✅)
+- [x] Study Flask reference implementation
+- [x] Extract RKLLM ctypes bindings from Flask example
+- [x] Implement rkllm_init() in rkllm_model.py
+- [x] Implement rkllm_run() for inference
+- [x] Add streaming callback support
+- [x] Test with Gemma-3-270M model (REMOVED - quality failure)
+- [x] Test with Qwen3-0.6B model (15.59 tok/s - PRODUCTION READY)
+- [x] Test with Gemma3-1B model (13.50 tok/s - USABLE)
+- [x] Test with Qwen3-4B model (3.13 tok/s - research only)
+- [x] Performance benchmarking system implemented
+- [x] Friendly model names with dynamic context detection
+- [x] Automatic model swapping
+- [x] Configurable inference parameters
+- **Status**: Real NPU inference working, production-ready models validated
 
-### Phase 4: Advanced Features
+### Phase 4: Advanced Features (CURRENT - October 20, 2025)
+
+**Short-term Goals:**
+
+#### 4.1: Prompt Caching System ⭐ (Highest Priority)
+- [ ] Design prompt cache architecture
+  - [ ] Implement prompt hash-based cache key generation
+  - [ ] Model-specific cache directories (`cache/{model_name}/`)
+  - [ ] Cache metadata tracking (hit rate, size, age)
+- [ ] RKLLM KV cache integration
+  - [ ] Research RKLLM prompt cache API (if available)
+  - [ ] Implement prefill cache save/load
+  - [ ] Handle cache invalidation on parameter changes
+- [ ] Cache management
+  - [ ] LRU eviction policy for size limits
+  - [ ] Cache warming for common system prompts
+  - [ ] Cache statistics endpoint
+- [ ] Testing and validation
+  - [ ] Benchmark TTFT before/after caching
+  - [ ] Test cache hit/miss scenarios
+  - [ ] Measure memory overhead
+  - [ ] Document cache configuration
+- **Expected Impact**: 50-70% TTFT reduction for repeated system prompts
+
+#### 4.2: Multi-Batch Inference 🚀 (Throughput)
+- [ ] Request queue implementation
+  - [ ] Thread-safe request queue
+  - [ ] Batch size configuration (`n_batch` parameter)
+  - [ ] Dynamic batching based on queue depth
+- [ ] Batch processing
+  - [ ] Group requests by model and parameters
+  - [ ] Parallel inference with RKLLM multi-batch
+  - [ ] Response routing to correct clients
+- [ ] Performance optimization
+  - [ ] Optimal batch size tuning
+  - [ ] Latency vs throughput trade-offs
+  - [ ] Queue timeout handling
+- [ ] Testing and benchmarking
+  - [ ] Concurrent request load testing
+  - [ ] Throughput measurement (requests/sec)
+  - [ ] Latency distribution analysis
+  - [ ] Document multi-batch configuration
+- **Expected Impact**: 2-3x throughput improvement for concurrent requests
+
+#### 4.3: LongRoPE Support 📏 (Extended Context)
+- [ ] RKLLM 1.2.2 upgrade preparation
+  - [ ] Check current RKLLM version (currently 1.2.1)
+  - [ ] Download/install RKLLM 1.2.2 runtime
+  - [ ] Verify LongRoPE API availability
+- [ ] Model reconversion with LongRoPE
+  - [ ] Convert Qwen3-0.6B with `--longrope` flag
+  - [ ] Convert Gemma3-1B with extended context + LongRoPE
+  - [ ] Test 32K-64K context windows
+- [ ] Extended context testing
+  - [ ] Create long-context benchmark prompts (8K-64K tokens)
+  - [ ] Measure TTFT and memory at various context lengths
+  - [ ] Validate output quality at max context
+  - [ ] Document context window capabilities
+- [ ] System requirements validation
+  - [ ] Confirm 16GB RAM sufficient for 64K contexts
+  - [ ] Monitor memory usage during long-context inference
+  - [ ] Test context length limits
+- **Expected Impact**: 32K-64K context support (up from current 16K max)
+
+**Phase 4 Success Criteria:**
+- ✅ Prompt caching reduces TTFT by ≥50% for cached prompts
+- ✅ Multi-batch increases throughput by ≥2x under load
+- ✅ LongRoPE enables ≥32K context without quality degradation
+- ✅ All features documented and benchmarked
+- ✅ Production-ready with configuration examples
 
 ### Phase 5: Docker Containerization
 - [ ] Create Dockerfile for ARM64

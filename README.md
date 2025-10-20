@@ -15,18 +15,25 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 
 ## Project Status
 
-✅ **Phase 3 Complete** - Friendly Model Names + Dynamic Context Detection
+✅ **Phase 3 Complete** - Real RKLLM Integration + Production Validation
+🔄 **Phase 4 In Progress** - Advanced Features (Prompt Caching, Multi-Batch, LongRoPE)
 
 **Completed:**
 - ✅ FastAPI server with OpenAI API compatibility
 - ✅ Real RKLLM ctypes bindings with NPU inference
-- ✅ **Friendly model names**: `qwen3-4b`, `qwen3-0.6b`, `gemma3-1b`, ~~`gemma3-270m`~~
+- ✅ **Friendly model names**: `qwen3-4b`, `qwen3-0.6b`, `gemma3-1b`
 - ✅ **Dynamic context detection**: Automatically extracts from filename (4K-16K)
 - ✅ **Automatic model swapping**: Unloads old model when loading new one
 - ✅ Comprehensive benchmarking suite with accurate RKLLM perf stats
 - ✅ Configurable inference parameters via `config/inference_config.json`
 - ✅ Smart model loading (skips reload if same model)
 - ✅ GPU acceleration + 4-thread big core optimization (RK3588)
+- ✅ Production viability assessment (0.6B-1.5B sweet spot)
+
+**Phase 4 Goals:**
+- 🔄 **Prompt Caching**: 50-70% TTFT reduction for repeated system prompts
+- 🔄 **Multi-Batch Inference**: 2-3x throughput improvement under load
+- 🔄 **LongRoPE Support**: 32K-64K context windows (requires RKLLM 1.2.2 upgrade)
 
 **Benchmark Results (RK3588 NPU @ Max Frequency):**
 - ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM - **RECOMMENDED** (Best balance)
@@ -45,7 +52,15 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 - ✅ GPU: 1.0 GHz (max frequency)
 - ✅ Already optimized with frequency locking script
 
+**Next Enhancements:**
+- 🚀 **Phase 4.1**: Prompt caching (50-70% TTFT reduction)
+- 🚀 **Phase 4.2**: Multi-batch inference (2-3x throughput gain)
+- 🚀 **Phase 4.3**: LongRoPE for 32K-64K contexts
+
 **Current Focus:**
+- 🔄 **Phase 4.1**: Implementing prompt caching system
+- ⏳ **Phase 4.2**: Multi-batch inference for throughput
+- ⏳ **Phase 4.3**: LongRoPE support for extended contexts
 - 🔄 Testing extended context capabilities (up to 16K)
 - 🔄 Model reconversion for consistent 16K context support
 - 🔄 Exploring 1.5B-2B model range for quality/speed balance
