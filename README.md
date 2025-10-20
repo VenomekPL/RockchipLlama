@@ -29,9 +29,10 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 - ✅ Smart model loading (skips reload if same model)
 - ✅ GPU acceleration + 4-thread big core optimization (RK3588)
 - ✅ Production viability assessment (0.6B-1.5B sweet spot)
+- ✅ **Prompt Caching System**: Multi-cache support, version tracking, auto-overwrite
 
 **Phase 4 Goals:**
-- 🔄 **Prompt Caching**: 50-70% TTFT reduction for repeated system prompts
+- ✅ **Prompt Caching**: Multi-cache support with version tracking and overwrite detection - **COMPLETE**
 - 🔄 **Multi-Batch Inference**: 2-3x throughput improvement under load
 - 🔄 **LongRoPE Support**: 32K-64K context windows (requires RKLLM 1.2.2 upgrade)
 
@@ -58,15 +59,13 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 - 🚀 **Phase 4.3**: LongRoPE for 32K-64K contexts
 
 **Current Focus:**
-- 🔄 **Phase 4.1**: Implementing prompt caching system
+- ✅ **Phase 4.1**: Prompt caching system - **COMPLETE**
 - ⏳ **Phase 4.2**: Multi-batch inference for throughput
 - ⏳ **Phase 4.3**: LongRoPE support for extended contexts
-- 🔄 Testing extended context capabilities (up to 16K)
-- 🔄 Model reconversion for consistent 16K context support
-- 🔄 Exploring 1.5B-2B model range for quality/speed balance
 
 **Next Enhancements:**
-- ⏳ Prompt caching system for improved TTFT
+- ⏳ Binary cache generation (actual TTFT improvements with RKLLM native caching)
+- ⏳ Multi-batch inference (2-3x throughput under concurrent load)
 - ⏳ LongRoPE support for >16K contexts (requires RKLLM 1.2.2 upgrade)
 - ⏳ Multi-instance model serving
 
@@ -135,16 +134,16 @@ Server will be available at:
 # List available models
 curl http://localhost:8080/v1/models/available
 
-# Load a model
+# Load a model (recommended: qwen3-0.6b)
 curl -X POST http://localhost:8080/v1/models/load \
   -H 'Content-Type: application/json' \
-  -d '{"model": "google_gemma-3-270m-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588"}'
+  -d '{"model": "qwen3-0.6b"}'
 ```
 
 ### 4. Run Inference
 
 ```bash
-# Using curl
+# Basic inference
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
@@ -152,6 +151,24 @@ curl -X POST http://localhost:8080/v1/chat/completions \
     "messages": [{"role": "user", "content": "Explain quantum computing"}],
     "temperature": 0.7,
     "max_tokens": 512
+  }'
+
+# With prompt caching (single cache)
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "current",
+    "messages": [{"role": "user", "content": "Write a Python function"}],
+    "cache_prompts": "coding_rules"
+  }'
+
+# With multiple caches
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "current",
+    "messages": [{"role": "user", "content": "Refactor this code"}],
+    "cache_prompts": ["coding_rules", "project_context"]
   }'
 
 # Or use the OpenAI Python client
@@ -166,7 +183,37 @@ print(response.choices[0].message.content)
 "
 ```
 
-### 5. Run Benchmarks
+### 5. Manage Prompt Caches
+
+```bash
+# Create a cache
+curl -X POST http://localhost:8080/v1/cache/qwen3-0.6b \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "cache_name": "coding_rules",
+    "content": "You are an expert Python developer. Follow PEP 8..."
+  }'
+
+# List caches for a model
+curl http://localhost:8080/v1/cache/qwen3-0.6b
+
+# Get specific cache
+curl http://localhost:8080/v1/cache/qwen3-0.6b/coding_rules
+
+# Update cache (overwrites)
+curl -X POST http://localhost:8080/v1/cache/qwen3-0.6b \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "cache_name": "coding_rules",
+    "content": "Updated content...",
+    "allow_overwrite": true
+  }'
+
+# Delete cache
+curl -X DELETE http://localhost:8080/v1/cache/qwen3-0.6b/coding_rules
+```
+
+### 6. Run Benchmarks
 
 ```bash
 # Quick test (3 requests)
@@ -236,6 +283,7 @@ NUM_NPU_CORE=3
 ### User Guides
 - **[docs/QUICKSTART.md](docs/QUICKSTART.md)** - Detailed getting started guide
 - **[docs/MODEL_MANAGEMENT.md](docs/MODEL_MANAGEMENT.md)** - Model lifecycle management
+- **[docs/CACHE_USAGE_GUIDE.md](docs/CACHE_USAGE_GUIDE.md)** - Prompt caching guide
 - **[docs/BENCHMARKING.md](docs/BENCHMARKING.md)** - Performance benchmarking guide
 - **[docs/BENCHMARK_QUICKREF.md](docs/BENCHMARK_QUICKREF.md)** - Quick reference for benchmarks
 

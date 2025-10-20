@@ -8,7 +8,7 @@ import time
 import uuid
 import logging
 import os
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, List
 import json
 
 from api.schemas import (
@@ -134,13 +134,53 @@ async def create_chat_completion(request: ChatCompletionRequest):
     Create a chat completion (OpenAI compatible)
     
     Endpoint: POST /v1/chat/completions
+    
+    Supports prompt caching via cache_prompts parameter:
+    - Single cache: "cache_prompts": "coding_rules"
+    - Multiple caches: "cache_prompts": ["coding_rules", "project_context"]
+    - System cache is always applied automatically
     """
     try:
         logger.info(f"Chat completion request for model: {request.model}")
         logger.debug(f"Messages: {len(request.messages)}, Stream: {request.stream}")
         
+        # Ensure model is loaded (needed for cache manager access)
+        current_model = await ensure_model_loaded(preferred_model=request.model)
+        
+        # 🔥 NEW: Handle cache prompts
+        cached_content = ""
+        loaded_cache_names = []
+        
+        if hasattr(current_model, 'cache_manager') and current_model.model_name:
+            cache_mgr = current_model.cache_manager
+            
+            # Prepare list of caches to load
+            cache_names_to_load = []
+            if request.cache_prompts:
+                # Convert single string to list
+                if isinstance(request.cache_prompts, str):
+                    cache_names_to_load = [request.cache_prompts]
+                else:
+                    cache_names_to_load = list(request.cache_prompts)
+            
+            # Load multiple caches (system always included)
+            if cache_names_to_load or True:  # Always load at least system
+                cached_content, loaded_cache_names = cache_mgr.load_multiple_caches(
+                    model_name=current_model.model_name,
+                    cache_names=cache_names_to_load,
+                    include_system=True  # Always include system cache
+                )
+                
+                if loaded_cache_names:
+                    logger.info(f"Applied caches: {', '.join(loaded_cache_names)}")
+        
         # Format messages into prompt
         prompt = format_chat_prompt(request.messages)
+        
+        # 🔥 Prepend cached content to prompt
+        if cached_content:
+            prompt = cached_content + "\n\n" + prompt
+            logger.debug(f"Prompt with caches: {len(cached_content)} cached chars + {len(prompt) - len(cached_content)} message chars")
         
         # Generate completion ID and timestamp
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -153,13 +193,11 @@ async def create_chat_completion(request: ChatCompletionRequest):
                     prompt=prompt,
                     request=request,
                     completion_id=completion_id,
-                    created_time=created_time
+                    created_time=created_time,
+                    loaded_cache_names=loaded_cache_names  # Pass cache info
                 ),
                 media_type="text/event-stream"
             )
-        
-        # Ensure model is loaded (auto-load if needed)
-        current_model = await ensure_model_loaded(preferred_model=request.model)
         
         # Non-streaming response - use loaded model
         generated_text, perf_stats = current_model.generate(
@@ -196,7 +234,9 @@ async def create_chat_completion(request: ChatCompletionRequest):
             usage=Usage(
                 prompt_tokens=len(prompt.split()),  # Rough estimate
                 completion_tokens=len(generated_text.split()),
-                total_tokens=len(prompt.split()) + len(generated_text.split())
+                total_tokens=len(prompt.split()) + len(generated_text.split()),
+                cached_prompts=loaded_cache_names if loaded_cache_names else None,  # 🔥 Track used caches
+                cache_hit=bool(loaded_cache_names)  # 🔥 Indicate if caches were used
             )
         )
         
@@ -211,12 +251,16 @@ async def stream_chat_completion(
     prompt: str,
     request: ChatCompletionRequest,
     completion_id: str,
-    created_time: int
+    created_time: int,
+    loaded_cache_names: Optional[List[str]] = None
 ) -> AsyncGenerator[str, None]:
     """
     Stream chat completion tokens
     
     Yields SSE-formatted chunks
+    
+    Args:
+        loaded_cache_names: List of cache names that were applied to the prompt
     """
     try:
         # Buffer for collecting generated text
@@ -342,3 +386,262 @@ async def health_check():
         "loaded_model": model_manager.get_loaded_model_name(),
         "timestamp": int(time.time())
     }
+
+
+# ============================================================================
+# CACHE MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@router.get("/cache")
+async def list_all_caches():
+    """
+    List all prompt caches across all models
+    
+    Endpoint: GET /v1/cache
+    
+    Returns:
+        Dictionary with model names as keys, each containing list of cache metadata
+    """
+    try:
+        current_model = model_manager.get_current_model()
+        if not current_model or not hasattr(current_model, 'cache_manager'):
+            raise HTTPException(status_code=503, detail="No model loaded with cache support")
+        
+        caches = current_model.cache_manager.list_all_caches()
+        
+        return {
+            "object": "list",
+            "data": caches,
+            "timestamp": int(time.time())
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing all caches: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cache/{model_name}")
+async def list_model_caches(model_name: str):
+    """
+    List prompt caches for a specific model
+    
+    Endpoint: GET /v1/cache/{model_name}
+    
+    Returns:
+        List of cache metadata for the specified model
+    """
+    try:
+        current_model = model_manager.get_current_model()
+        if not current_model or not hasattr(current_model, 'cache_manager'):
+            raise HTTPException(status_code=503, detail="No model loaded with cache support")
+        
+        caches = current_model.cache_manager.list_caches(model_name)
+        
+        return {
+            "object": "list",
+            "model": model_name,
+            "data": caches,
+            "count": len(caches),
+            "timestamp": int(time.time())
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing caches for {model_name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cache/{model_name}/{cache_name}")
+async def get_cache_info(model_name: str, cache_name: str):
+    """
+    Get detailed information about a specific cache
+    
+    Endpoint: GET /v1/cache/{model_name}/{cache_name}
+    
+    Returns:
+        Cache metadata and content (if requested)
+    """
+    try:
+        current_model = model_manager.get_current_model()
+        if not current_model or not hasattr(current_model, 'cache_manager'):
+            raise HTTPException(status_code=503, detail="No model loaded with cache support")
+        
+        cache_mgr = current_model.cache_manager
+        
+        # Check if cache exists
+        if not cache_mgr.cache_exists(model_name, cache_name):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Cache '{cache_name}' not found for model '{model_name}'"
+            )
+        
+        # Get metadata
+        caches = cache_mgr.list_caches(model_name)
+        cache_metadata = next((c for c in caches if c['cache_name'] == cache_name), None)
+        
+        if not cache_metadata:
+            raise HTTPException(status_code=404, detail="Cache metadata not found")
+        
+        # Load cache content
+        content = cache_mgr.load_cache(model_name, cache_name)
+        
+        return {
+            "object": "cache",
+            "model": model_name,
+            "cache_name": cache_name,
+            "metadata": cache_metadata,
+            "content": content,
+            "content_preview": content[:200] + "..." if content and len(content) > 200 else content,
+            "timestamp": int(time.time())
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting cache info: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cache/{model_name}")
+async def create_or_update_cache(
+    model_name: str,
+    request: Request
+):
+    """
+    Create or update a prompt cache for a model
+    
+    Endpoint: POST /v1/cache/{model_name}
+    
+    Request Body:
+    {
+        "cache_name": "my_cache",
+        "content": "Cache content here...",
+        "source": "optional_source_info",
+        "allow_overwrite": true
+    }
+    
+    Returns:
+        Cache creation/update metadata
+    """
+    try:
+        # Get request body
+        body = await request.json()
+        cache_name = body.get('cache_name')
+        content = body.get('content')
+        source = body.get('source', 'api_creation')
+        allow_overwrite = body.get('allow_overwrite', True)
+        
+        # Validate required fields
+        if not cache_name:
+            raise HTTPException(status_code=400, detail="Missing required field: cache_name")
+        if not content:
+            raise HTTPException(status_code=400, detail="Missing required field: content")
+        
+        # Validate cache_name
+        if not cache_name.replace('_', '').replace('-', '').isalnum():
+            raise HTTPException(
+                status_code=400,
+                detail="cache_name must contain only alphanumeric characters, hyphens, and underscores"
+            )
+        
+        # Prevent overwriting system cache
+        if cache_name == "system":
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot manually create/update 'system' cache. It's auto-generated from config/system.txt"
+            )
+        
+        # Get current model (to access cache manager)
+        current_model = model_manager.get_current_model()
+        if not current_model or not hasattr(current_model, 'cache_manager'):
+            raise HTTPException(status_code=503, detail="No model loaded with cache support")
+        
+        cache_mgr = current_model.cache_manager
+        
+        # Check if cache exists and overwrite is disabled
+        if cache_mgr.cache_exists(model_name, cache_name) and not allow_overwrite:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cache '{cache_name}' already exists for model '{model_name}'. Set allow_overwrite=true to replace it."
+            )
+        
+        # Save cache
+        result = cache_mgr.save_cache(
+            model_name=model_name,
+            cache_name=cache_name,
+            content=content,
+            source=source,
+            allow_overwrite=allow_overwrite
+        )
+        
+        return {
+            "object": "cache.created" if not result['was_overwrite'] else "cache.updated",
+            "model": model_name,
+            "cache_name": cache_name,
+            "was_overwrite": result['was_overwrite'],
+            "old_size": result['old_size'] if result['was_overwrite'] else None,
+            "new_size": result['new_size'],
+            "version": result['version'],
+            "timestamp": int(time.time()),
+            "message": f"Cache '{cache_name}' {'updated' if result['was_overwrite'] else 'created'} successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating/updating cache: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/cache/{model_name}/{cache_name}")
+async def delete_cache(model_name: str, cache_name: str):
+    """
+    Delete a specific cache
+    
+    Endpoint: DELETE /v1/cache/{model_name}/{cache_name}
+    
+    Note: Cannot delete 'system' cache
+    """
+    try:
+        # Prevent deletion of system cache
+        if cache_name == "system":
+            raise HTTPException(
+                status_code=403, 
+                detail="Cannot delete system cache. It will be auto-regenerated on model load."
+            )
+        
+        current_model = model_manager.get_current_model()
+        if not current_model or not hasattr(current_model, 'cache_manager'):
+            raise HTTPException(status_code=503, detail="No model loaded with cache support")
+        
+        cache_mgr = current_model.cache_manager
+        
+        # Check if cache exists
+        if not cache_mgr.cache_exists(model_name, cache_name):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Cache '{cache_name}' not found for model '{model_name}'"
+            )
+        
+        # Delete cache
+        success = cache_mgr.delete_cache(model_name, cache_name)
+        
+        if success:
+            return {
+                "object": "cache.deleted",
+                "model": model_name,
+                "cache_name": cache_name,
+                "deleted": True,
+                "timestamp": int(time.time())
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete cache")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting cache: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

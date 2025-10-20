@@ -46,13 +46,12 @@ class ModelManager:
             logger.info(f"ModelManager initialized with models_dir: {self.models_dir}")
             self._discover_models()
     
-    def _create_friendly_name(self, filename: str) -> str:
-        """Create a friendly name from RKLLM filename
+    def _create_friendly_name_from_filename(self, filename: str) -> str:
+        """
+        DEPRECATED: Create a friendly name from RKLLM filename
         
-        Examples:
-            Qwen_Qwen3-0.6B-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm → qwen3-0.6b
-            gemma-3-1b-it_w8a8.rkllm → gemma3-1b
-            google_gemma-3-270m-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm → gemma3-270m
+        This is now replaced by folder-based naming.
+        Folder name = friendly name (user-defined).
         """
         # Remove .rkllm extension
         name = filename.replace('.rkllm', '').lower()
@@ -86,34 +85,79 @@ class ModelManager:
         return 4096
     
     def _discover_models(self):
-        """Scan models directory and build cache with friendly names"""
+        """
+        Scan models directory for model folders and build cache
+        
+        New Structure:
+            models/
+            ├── qwen3-0.6b/           # Folder name = friendly name
+            │   └── model.rkllm       # Actual model file
+            ├── qwen3-4b/
+            │   └── model.rkllm
+            └── gemma3-1b/
+                └── model.rkllm
+        
+        Folder name is used as the friendly name.
+        User can rename folders to customize friendly names.
+        """
         if not os.path.exists(self.models_dir):
             logger.warning(f"Models directory not found: {self.models_dir}")
             return
         
         self._model_cache.clear()
+        model_count = 0
         
-        for filename in os.listdir(self.models_dir):
-            if filename.endswith('.rkllm'):
-                path = os.path.join(self.models_dir, filename)
-                friendly_name = self._create_friendly_name(filename)
-                context_size = self._extract_context_size(filename)
-                
-                model_info = {
-                    'id': friendly_name,
-                    'filename': filename,
-                    'path': path,
-                    'context_size': context_size,
-                    'object': 'model',
-                    'owned_by': 'rkllm'
-                }
-                
-                # Store by both friendly name and full filename
-                self._model_cache[friendly_name] = model_info
-                self._model_cache[filename] = model_info
-                self._model_cache[filename.replace('.rkllm', '')] = model_info
-                
-                logger.info(f"Discovered model: {filename} → '{friendly_name}' (ctx={context_size})")
+        # Scan for model folders
+        for folder_name in os.listdir(self.models_dir):
+            folder_path = os.path.join(self.models_dir, folder_name)
+            
+            # Skip files in root models directory
+            if not os.path.isdir(folder_path):
+                continue
+            
+            # Find .rkllm files in this folder
+            rkllm_files = [f for f in os.listdir(folder_path) if f.endswith('.rkllm')]
+            
+            if not rkllm_files:
+                logger.warning(f"No .rkllm file found in {folder_path}")
+                continue
+            
+            # Use first .rkllm file found (user responsibility to have only one)
+            if len(rkllm_files) > 1:
+                logger.warning(
+                    f"Multiple .rkllm files in {folder_path}. "
+                    f"Using first one: {rkllm_files[0]}"
+                )
+            
+            model_filename = rkllm_files[0]
+            model_path = os.path.join(folder_path, model_filename)
+            
+            # Folder name IS the friendly name
+            friendly_name = folder_name
+            
+            # Extract context size from filename
+            context_size = self._extract_context_size(model_filename)
+            
+            model_info = {
+                'id': friendly_name,
+                'filename': model_filename,
+                'folder': folder_name,
+                'path': model_path,
+                'context_size': context_size,
+                'object': 'model',
+                'owned_by': 'rkllm'
+            }
+            
+            # Store by friendly name only (folder name)
+            self._model_cache[friendly_name] = model_info
+            model_count += 1
+            
+            logger.info(
+                f"Discovered model: {friendly_name} "
+                f"({model_filename}, ctx={context_size})"
+            )
+        
+        logger.info(f"Discovered {model_count} models")
     
     def find_model_path(self, model_identifier: str) -> Optional[str]:
         """Find model path by friendly name, filename, or normalized name

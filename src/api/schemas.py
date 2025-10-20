@@ -37,7 +37,13 @@ class ChatCompletionRequest(BaseModel):
     repeat_penalty: Optional[float] = Field(default=1.1, ge=1.0, le=2.0, description="RKLLM repeat_penalty (default: 1.1)")
     n: Optional[int] = Field(default=1, ge=1, le=1, description="Number of completions (only 1 supported)")
     user: Optional[str] = None
-    user: Optional[str] = None
+    
+    # 🔥 NEW: Prompt caching support
+    cache_prompts: Optional[Union[str, List[str]]] = Field(
+        default=None,
+        description="Cache name(s) to prepend to the prompt. Can be a single string or array of cache names. "
+                    "System cache is always applied automatically. Multiple caches are concatenated in order."
+    )
     
     class Config:
         json_schema_extra = {
@@ -48,7 +54,8 @@ class ChatCompletionRequest(BaseModel):
                     {"role": "user", "content": "Hello!"}
                 ],
                 "temperature": 0.8,
-                "max_tokens": 512
+                "max_tokens": 512,
+                "cache_prompts": ["coding_rules", "project_context"]
             }
         }
 
@@ -65,6 +72,16 @@ class Usage(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    
+    # 🔥 NEW: Cache usage tracking
+    cached_prompts: Optional[List[str]] = Field(
+        default=None,
+        description="List of cache names that were applied to this request"
+    )
+    cache_hit: Optional[bool] = Field(
+        default=None,
+        description="Whether any caches were used in this request"
+    )
 
 
 class ChatCompletionResponse(BaseModel):

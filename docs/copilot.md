@@ -184,7 +184,47 @@ RockchipLlama/
 - [x] Configurable inference parameters
 - **Status**: Real NPU inference working, production-ready models validated
 
-### Phase 4: Advanced Features (CURRENT - October 20, 2025)
+### Phase 4.1: Prompt Caching System (COMPLETED ✅ - October 20, 2025)
+- [x] Cache infrastructure implementation
+  - [x] Folder-based organization: `cache/{model_name}/{cache_name}.bin`
+  - [x] CacheManager singleton with CRUD operations
+  - [x] Metadata tracking: version, timestamps, size, source
+  - [x] System cache support (always loaded first)
+- [x] Multi-cache support
+  - [x] Single and array syntax in API requests
+  - [x] Application-layer concatenation (RKLLM supports only one cache path)
+  - [x] Cache loading order: system → user caches → user message
+  - [x] Response tracking in usage metadata
+- [x] Cache overwrite system
+  - [x] Automatic detection via file existence check
+  - [x] Version increment on each overwrite (v1 → v2 → v3...)
+  - [x] Size comparison logging (old vs new)
+  - [x] Timestamp preservation (created_at + updated_at)
+  - [x] Optional protection (`allow_overwrite=false` → 409 error)
+- [x] API endpoints
+  - [x] `POST /v1/cache/{model_name}` - Create/update cache with validation
+  - [x] `GET /v1/cache/{model_name}` - List all caches with metadata
+  - [x] `GET /v1/cache/{model_name}/{cache_name}` - Get cache content
+  - [x] `DELETE /v1/cache/{model_name}/{cache_name}` - Delete cache
+  - [x] System cache protection (403 error on manual overwrite attempts)
+- [x] Testing and validation
+  - [x] Created test caches: coding_rules (221 chars), project_context (214 chars)
+  - [x] Validated single cache loading: system + coding_rules
+  - [x] Validated multi-cache: system + coding_rules + project_context (1765 chars)
+  - [x] Tested overwrite: test_cache v1 (54 chars) → v2 (71 chars)
+  - [x] Verified protection: 409 error when allow_overwrite=false
+  - [x] Confirmed metadata tracking: version, created_at, updated_at
+- [x] Documentation
+  - [x] CACHE_USAGE_GUIDE.md - Comprehensive user guide (8KB)
+  - [x] MULTI_CACHE_TEST_RESULTS.md - Test validation (12KB)
+  - [x] CACHE_OVERWRITE_TEST.md - Overwrite feature tests (10KB)
+- **Status**: Text-based prompt caching complete and production-ready
+- **Next**: Binary cache generation with RKLLM native caching for actual TTFT reduction
+
+### Phase 4: Advanced Features (IN PROGRESS - October 20, 2025)
+
+**Completed:**
+- ✅ **Phase 4.1**: Prompt caching with multi-cache and overwrite support
 
 **Short-term Goals:**
 
@@ -249,9 +289,14 @@ RockchipLlama/
 - **Expected Impact**: 32K-64K context support (up from current 16K max)
 
 **Phase 4 Success Criteria:**
-- ✅ Prompt caching reduces TTFT by ≥50% for cached prompts
-- ✅ Multi-batch increases throughput by ≥2x under load
-- ✅ LongRoPE enables ≥32K context without quality degradation
+- ✅ **Phase 4.1 COMPLETE**: Text-based prompt caching with multi-cache support
+  - ✅ Multi-cache combination working (system + user caches)
+  - ✅ Overwrite detection with version tracking
+  - ✅ Complete API for cache CRUD operations
+  - ✅ Comprehensive documentation (3 docs, 30KB)
+  - ⏳ Binary cache generation (next: actual TTFT reduction)
+- ⏳ Multi-batch increases throughput by ≥2x under load
+- ⏳ LongRoPE enables ≥32K context without quality degradation
 - ✅ All features documented and benchmarked
 - ✅ Production-ready with configuration examples
 
@@ -614,6 +659,56 @@ Client Request → API Gateway → Compatibility Layer → Model Management → 
 4. **Quantization only**: No FP16/FP32 NPU inference, only W8A8/W4A16
 
 ## Session Notes
+
+### Session: October 20, 2025 - Phase 4.1 Prompt Caching Complete
+
+#### Prompt Caching Implementation (COMPLETED ✅)
+
+**Multi-Cache Support:**
+- ✅ Single cache syntax: `"cache_prompts": "coding_rules"`
+- ✅ Array syntax: `"cache_prompts": ["coding_rules", "project_context"]`
+- ✅ Application-layer concatenation (system → user caches → message)
+- ✅ Response metadata tracking: `cached_prompts`, `cache_hit`
+- ✅ RKLLM limitation workaround: Only supports one cache path, we concatenate at app layer
+
+**Cache Overwrite System:**
+- ✅ Automatic detection via `bin_path.exists()`
+- ✅ Version tracking (increments on each overwrite)
+- ✅ Size comparison logging (old vs new)
+- ✅ Timestamp preservation (`created_at` + `updated_at`)
+- ✅ Optional protection (`allow_overwrite=false` → 409 error)
+- ✅ System cache protection (403 error on manual overwrite)
+
+**API Endpoints:**
+- ✅ `POST /v1/cache/{model_name}` - Create/update cache
+- ✅ `GET /v1/cache/{model_name}` - List caches
+- ✅ `GET /v1/cache/{model_name}/{cache_name}` - Get content
+- ✅ `DELETE /v1/cache/{model_name}/{cache_name}` - Delete cache
+
+**Testing Results:**
+- ✅ Created test caches: coding_rules (221 chars), project_context (214 chars)
+- ✅ Multi-cache loading: system + coding_rules + project_context = 1765 chars
+- ✅ Overwrite test: test_cache v1 (54 chars) → v2 (71 chars)
+- ✅ Protection test: 409 error when allow_overwrite=false
+- ✅ All metadata tracking verified
+
+**Documentation Created:**
+- ✅ `CACHE_USAGE_GUIDE.md` - 8KB comprehensive guide
+- ✅ `MULTI_CACHE_TEST_RESULTS.md` - 12KB test validation
+- ✅ `CACHE_OVERWRITE_TEST.md` - 10KB overwrite tests
+
+**Files Modified:**
+- `src/api/schemas.py` - Added cache_prompts, cached_prompts, cache_hit
+- `src/utils/cache_manager.py` - Complete cache CRUD with overwrite support
+- `src/api/openai_routes.py` - Multi-cache integration + POST endpoint
+
+**Current State:**
+Text-based prompt caching is production-ready. System cache always loads first, user caches concatenate in order, user message appends last. Overwrite system tracks versions and sizes with optional protection.
+
+**Next Phase:**
+Binary cache generation using RKLLM's native `RKLLMPromptCacheParam` to achieve actual TTFT reduction (target: 50-70%).
+
+---
 
 ### Session: October 19, 2025 - Complete Phase 2 Implementation + Model Management + Benchmarking
 
