@@ -30,11 +30,14 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 
 **Benchmark Results (RK3588 NPU):**
 - ⭐ **Qwen3-4B** (NEW!): 3.13 tokens/sec, 16K context, 5027 MB RAM - **BEST QUALITY**
+  - 6/10 tests completed (4 timeouts with 300s limit)
+  - Re-running with NO timeout (3600s) to complete all tests
 - ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM - **BEST SPEED**
 - ✅ **Gemma3-1B**: 13.50 tokens/sec, 4K context, 1243 MB RAM (needs 16K reconversion)
 - ❌ **Gemma3-270m**: ~~29.80 tokens/sec~~ - **REMOVED** (produces garbage output)
 
 **Current Focus:**
+- 🔄 **ACTIVE**: Re-benchmarking Qwen3-4B with 1-hour timeout to complete all 10 tests
 - 🔄 Testing extended context capabilities (up to 16K)
 - 🔄 Model reconversion for consistent 16K context support
 

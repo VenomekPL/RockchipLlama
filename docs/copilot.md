@@ -998,3 +998,43 @@ Likely poor w8a8 quantization or model conversion issues. Some models don't conv
 - ✅ **Qwen3-0.6B**: 15.59 tok/s, excellent quality - **RECOMMENDED**
 - ✅ **Gemma3-1B**: 13.50 tok/s, good quality (needs 16K reconversion)
 
+#### Qwen3-4B Benchmark Timeout Investigation (October 20, 2025 - Evening)
+
+**Issue Discovered:**
+- User noticed tests 7-10 failed with timeout during Qwen3-4B benchmark
+- **Root Cause**: Default timeout was **300 seconds (5 minutes)**
+- Qwen3-4B generates at ~3 tok/s (5x slower than 0.6B)
+- Longer prompts + thorough responses exceeded 5-minute limit
+
+**Timeout Configuration:**
+```python
+# scripts/benchmark.py - Line 135
+def __init__(self, base_url: str = "http://localhost:8080", timeout: int = 300):
+    self.timeout = timeout  # Default: 5 minutes
+```
+
+**Solution Implemented:**
+- ✅ Re-running benchmark with `--timeout 3600` (1 hour)
+- ✅ Started at 17:03:30 (October 20, 2025)
+- ✅ Process ID: 219359
+- ✅ Output file: `benchmarks/benchmark_qwen3_4b_no_timeout_20251020_170330.json`
+
+**Expected Results:**
+- All 10 tests should complete (including previous 7-10 failures)
+- Total runtime: 40-60 minutes estimated
+- Quality validation for all test types
+- Complete performance metrics
+
+**Friendly Name Verification:**
+- ✅ `qwen3-0.6b` - Correctly identifies 0.6B model
+- ✅ `qwen3-4b` - Correctly identifies 4B model (NEW!)
+- ✅ `gemma3-1b` - Correctly identifies 1B model
+- ✅ Names already properly distinguished in model cache
+
+**Status**: 
+- 🔄 Benchmark running in background (nohup)
+- ⏱️ Expected completion: ~18:00-18:30
+- 📊 Will provide complete quality assessment when finished
+
+```
+
