@@ -210,8 +210,11 @@ coverage/
 models/*.rkllm
 models/*/*.rkllm
 models/*/
+*.rkllm
 
 # Cache files (keep folder structure, ignore cache contents)
 cache/
 cache/*/*.bin
 cache/*/*.json
+cache/*/*.rkllm_cache
+*.rkllm_cache
