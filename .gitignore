@@ -205,6 +205,13 @@ secrets/
 # Test artifacts
 test-results/
 coverage/
-models/gemma-3-1b-it_w8a8.rkllm
-models/google_gemma-3-270m-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm
-models/Qwen_Qwen3-0.6B-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm
+
+# Model files (keep folder structure, ignore model files)
+models/*.rkllm
+models/*/*.rkllm
+models/*/
+
+# Cache files (keep folder structure, ignore cache contents)
+cache/
+cache/*/*.bin
+cache/*/*.json
