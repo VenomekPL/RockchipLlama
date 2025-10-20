@@ -55,12 +55,13 @@ Binary caching reduces Time To First Token by **95.8%** for repeated prompts!
 ## Project Status
 
 **✅ Phase 4.1 Complete** - Binary Prompt Caching (23.5x speedup achieved)  
-**✅ Queue-Based Concurrency** - Stable concurrent request handling with n_batch=1
+**✅ Phase 4.2 Complete** - Config-based parameters + RKLLM v1.2.2 upgrade  
+**✅ Queue-Based Concurrency** - Stable concurrent request handling
 
 **Next Steps:**
-- Phase 4.3: LongRoPE support (32K-64K context)
-- Phase 4.4: HuggingFace integration
-- Phase 4.5: Ollama API compatibility
+- Phase 4.3: LongRoPE implementation (requires model rebuilding with toolkit)
+- Phase 4.4: Ollama API compatibility
+- Phase 4.5: HuggingFace integration
 
 ---
 
@@ -249,6 +250,8 @@ RKLLM_LIB_PATH=/usr/lib/librkllmrt.so
 - 📊 **[BENCHMARKS.md](BENCHMARKS.md)** - Performance results & comparisons
 - 📖 **[docs/copilot.md](docs/copilot.md)** - Full changelog & design notes
 - 🔧 **[docs/rkllm.md](docs/rkllm.md)** - RKLLM technical reference
+- 🎯 **[docs/longrope_guide.md](docs/longrope_guide.md)** - LongRoPE (extended context) implementation guide
+- 🏗️ **[docs/queue_architecture.md](docs/queue_architecture.md)** - Queue-based concurrency design
 
 ---
 
