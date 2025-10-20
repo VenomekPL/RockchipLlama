@@ -60,6 +60,47 @@ python scripts/test_api.py
 python scripts/test_model_management.py
 ```
 
+**`test_binary_cache.py`** (4.4KB)
+- Tests binary cache creation and loading
+- Validates RKLLM native prompt caching
+- Created during Phase 4.1 development
+
+**Usage:**
+```bash
+python scripts/test_binary_cache.py
+```
+
+**`test_cache_integration.py`** (6.8KB)
+- Integration tests for binary cache API
+- Tests cache creation, loading, and usage
+- Validates cache_hit metadata
+
+**Usage:**
+```bash
+python scripts/test_cache_integration.py
+```
+
+**`test_simple_performance.py`** (3.1KB)
+- Quick performance comparison test
+- Tests with and without cache
+- Simple validation of cache benefits
+
+**Usage:**
+```bash
+python scripts/test_simple_performance.py
+```
+
+**`test_real_cache_performance.py`** (10.4KB)
+- Comprehensive cache performance test
+- Uses real 1326-char system prompt
+- Measures actual TTFT improvements
+- Documents expected vs actual results
+
+**Usage:**
+```bash
+python scripts/test_real_cache_performance.py
+```
+
 ## 🚀 Quick Start
 
 From the project root directory:
