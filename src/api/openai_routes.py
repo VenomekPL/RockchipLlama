@@ -308,27 +308,19 @@ async def list_models():
     List available models (OpenAI compatible)
     
     Endpoint: GET /v1/models
+    
+    Returns models with friendly names and context information
     """
     try:
-        # Scan models directory
-        models_dir = settings.models_dir
-        model_files = []
-        
-        if os.path.exists(models_dir):
-            model_files = [
-                f for f in os.listdir(models_dir)
-                if f.endswith('.rkllm')
-            ]
+        # Get models from model manager (includes friendly names and context)
+        available_models = model_manager.list_available_models()
         
         # Create model info list
         models = []
-        for model_file in model_files:
-            # Extract model name (remove .rkllm extension)
-            model_name = model_file.replace('.rkllm', '')
-            
+        for model_info in available_models:
             models.append(
                 ModelInfo(
-                    id=model_name,
+                    id=model_info['friendly_name'],
                     created=int(time.time()),
                     owned_by="rockchip"
                 )

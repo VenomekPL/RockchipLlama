@@ -15,32 +15,40 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 
 ## Project Status
 
-✅ **Phase 3 Complete** - Friendly Model Names + Dynamic Context Detection
+� **Phase 3 Complete** - RKLLM NPU integration + Configuration system
 
 **Completed:**
 - ✅ FastAPI server with OpenAI API compatibility
-- ✅ Real RKLLM ctypes bindings with NPU inference
-- ✅ **Friendly model names**: `qwen3-0.6b`, `gemma3-270m`, `gemma3-1b`
-- ✅ **Dynamic context detection**: Automatically extracts from filename (4K-16K)
-- ✅ **Automatic model swapping**: Unloads old model when loading new one
-- ✅ Comprehensive benchmarking suite with accurate RKLLM perf stats
-- ✅ Configurable inference parameters via `config/inference_config.json`
-- ✅ Smart model loading (skips reload if same model)
-- ✅ GPU acceleration + 4-thread big core optimization (RK3588)
-
-**Benchmark Results (RK3588 NPU):**
-- ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM
-- ✅ **Gemma3-270m**: 29.80 tokens/sec, 16K context, 602 MB RAM  
-- ✅ **Gemma3-1B**: 13.50 tokens/sec, 4K context, 1243 MB RAM
+- ✅ Model management system (load/unload/list with smart reload detection)
+- ✅ Comprehensive benchmarking suite with streaming
+- ✅ Real RKLLM ctypes bindings implemented
+- ✅ Model successfully loads on NPU (RKLLM 1.2.1 + driver 0.9.7)
+- ✅ GPU acceleration + 4-thread big core optimization
+- ✅ **Fixed**: Accurate performance metrics from RKLLM perf stats
+  - Real TTFT (prefill time)
+  - Separate input/output token speeds
+  - NPU memory usage tracking
+  - Streaming responses include performance data
+- ✅ **Fixed**: Configurable inference parameters
+  - `config/inference_config.json` for easy parameter tuning
+  - All RKLLM sampling parameters configurable (top_k, top_p, temperature, repeat_penalty)
+  - Hardware settings configurable (NPU cores, CPU mask)
+- ✅ **Fixed**: Smart model loading
+  - Skips reload if same model already loaded
+  - Prevents `rkllm_destroy()` hanging issue
+  - Only reloads when switching between different models
+- ✅ **Verified**: Coherent output generation with proper parameters
+  - Tested with Qwen3-0.6B: ~23 tokens/sec
+  - Quality output with user's preferred settings
 
 **Current Focus:**
-- 🔄 Testing extended context capabilities (up to 16K)
-- 🔄 Model reconversion for consistent 16K context support
+- 🔄 Running comprehensive benchmarks with optimized parameters
+- 🔄 Testing different parameter configurations for various models
 
-**Next Enhancements:**
-- ⏳ Prompt caching system for improved TTFT
-- ⏳ LongRoPE support for >16K contexts (requires RKLLM 1.2.2 upgrade)
-- ⏳ Multi-instance model serving
+**Future Enhancements:**
+- ⏳ Chat template support for better prompt formatting
+- ⏳ System prompt integration
+- ⏳ Prompt caching for improved performance
 
 ## Repository Structure
 

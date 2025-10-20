@@ -1,25 +1,31 @@
 """
-Model Manager Service
-Handles model lifecycle: loading, unloading, tracking
+Model Manager - Handles model discovery and lifecycle with friendly names
 """
 import os
+import re
+import sys
 import logging
 from typing import Optional, List, Dict, Any
+import threading
 from pathlib import Path
-from threading import Lock
 
-from models.rkllm_model import RKLLMModel
+# Add project root to path for config imports
+_project_root = Path(__file__).parent.parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 from config.settings import settings
+from .rkllm_model import RKLLMModel
 
 logger = logging.getLogger(__name__)
 
 
 class ModelManager:
     """
-    Singleton service for managing RKLLM model lifecycle
+    Singleton service for managing RKLLM model lifecycle with friendly names
     """
     _instance = None
-    _lock = Lock()
+    _lock = threading.Lock()
     
     def __new__(cls):
         if cls._instance is None:
@@ -34,63 +40,166 @@ class ModelManager:
             self.current_model: Optional[RKLLMModel] = None
             self.current_model_name: Optional[str] = None
             self.models_dir = settings.models_dir
+            self._model_cache: Dict[str, Dict[str, Any]] = {}
+            self._instance_lock = threading.Lock()
             self.initialized = True
             logger.info(f"ModelManager initialized with models_dir: {self.models_dir}")
+            self._discover_models()
     
-    def list_available_models(self) -> List[Dict[str, Any]]:
-        """
-        List all available .rkllm models in models directory
+    def _create_friendly_name(self, filename: str) -> str:
+        """Create a friendly name from RKLLM filename
         
-        Returns:
-            List of model info dictionaries
+        Examples:
+            Qwen_Qwen3-0.6B-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm → qwen3-0.6b
+            gemma-3-1b-it_w8a8.rkllm → gemma3-1b
+            google_gemma-3-270m-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm → gemma3-270m
         """
+        # Remove .rkllm extension
+        name = filename.replace('.rkllm', '').lower()
+        
+        # Extract key components for common patterns
+        if 'qwen3' in name and '0.6b' in name:
+            return 'qwen3-0.6b'
+        elif 'qwen3' in name and '4b' in name:
+            return 'qwen3-4b'
+        elif 'qwen2' in name and '0.5b' in name:
+            return 'qwen2-0.5b'
+        elif 'qwen2' in name and '1.5b' in name:
+            return 'qwen2-1.5b'
+        elif 'gemma' in name and '1b' in name:
+            return 'gemma3-1b'
+        elif 'gemma' in name and '270m' in name:
+            return 'gemma3-270m'
+        elif 'gemma' in name and '2b' in name:
+            return 'gemma3-2b'
+        else:
+            # Fallback: use first part before version/config
+            parts = name.replace('_', '-').split('-')
+            return parts[0] if parts else name
+    
+    def _extract_context_size(self, filename: str) -> int:
+        """Extract context size from filename or return default"""
+        ctx_match = re.search(r'ctx(\d+)', filename)
+        if ctx_match:
+            return int(ctx_match.group(1))
+        # If no ctx specified, model was likely built with 4K context
+        return 4096
+    
+    def _discover_models(self):
+        """Scan models directory and build cache with friendly names"""
         if not os.path.exists(self.models_dir):
-            logger.warning(f"Models directory does not exist: {self.models_dir}")
-            return []
+            logger.warning(f"Models directory not found: {self.models_dir}")
+            return
         
-        models = []
+        self._model_cache.clear()
+        
         for filename in os.listdir(self.models_dir):
             if filename.endswith('.rkllm'):
-                filepath = os.path.join(self.models_dir, filename)
-                file_size = os.path.getsize(filepath)
+                path = os.path.join(self.models_dir, filename)
+                friendly_name = self._create_friendly_name(filename)
+                context_size = self._extract_context_size(filename)
                 
-                # Extract model name (without .rkllm extension)
-                model_name = filename.replace('.rkllm', '')
-                
-                models.append({
-                    'name': model_name,
+                model_info = {
+                    'id': friendly_name,
                     'filename': filename,
-                    'path': filepath,
-                    'size_bytes': file_size,
-                    'size_mb': round(file_size / (1024 * 1024), 2),
-                    'loaded': (model_name == self.current_model_name)
-                })
-        
-        return sorted(models, key=lambda x: x['size_bytes'])
+                    'path': path,
+                    'context_size': context_size,
+                    'object': 'model',
+                    'owned_by': 'rkllm'
+                }
+                
+                # Store by both friendly name and full filename
+                self._model_cache[friendly_name] = model_info
+                self._model_cache[filename] = model_info
+                self._model_cache[filename.replace('.rkllm', '')] = model_info
+                
+                logger.info(f"Discovered model: {filename} → '{friendly_name}' (ctx={context_size})")
     
-    def get_model_path(self, model_name: str) -> Optional[str]:
-        """
-        Get full path for a model by name
+    def find_model_path(self, model_identifier: str) -> Optional[str]:
+        """Find model path by friendly name, filename, or normalized name
         
         Args:
-            model_name: Model name (with or without .rkllm extension)
-            
+            model_identifier: Can be:
+                - Friendly name: "qwen3-0.6b"
+                - Full filename: "Qwen_Qwen3-0.6B-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm"
+                - Normalized name: "Qwen_Qwen3-0.6B-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588"
+        
         Returns:
             Full path to model file, or None if not found
         """
-        # Add .rkllm extension if not present
-        if not model_name.endswith('.rkllm'):
-            filename = f"{model_name}.rkllm"
-        else:
-            filename = model_name
+        # Direct lookup
+        if model_identifier in self._model_cache:
+            return self._model_cache[model_identifier]['path']
         
-        filepath = os.path.join(self.models_dir, filename)
+        # Case-insensitive search
+        model_id_lower = model_identifier.lower()
+        for key, model_info in self._model_cache.items():
+            if key.lower() == model_id_lower:
+                return model_info['path']
         
-        if os.path.exists(filepath):
-            return filepath
-        
-        logger.warning(f"Model file not found: {filepath}")
         return None
+    
+    def get_model_details(self, model_identifier: str) -> Optional[Dict[str, Any]]:
+        """Get full model information by friendly name or filename"""
+        if model_identifier in self._model_cache:
+            return self._model_cache[model_identifier].copy()
+        
+        # Case-insensitive search
+        model_id_lower = model_identifier.lower()
+        for key, model_info in self._model_cache.items():
+            if key.lower() == model_id_lower:
+                return model_info.copy()
+        
+        return None
+    
+    def list_available_models(self) -> List[Dict[str, Any]]:
+        """
+        List all available .rkllm models with friendly names and context info
+        
+        Returns:
+            List of model info dictionaries with friendly names
+        """
+        # Return unique models (avoid duplicates from multiple lookup keys)
+        seen_paths = set()
+        unique_models = []
+        
+        for model_info in self._model_cache.values():
+            path = model_info['path']
+            if path not in seen_paths:
+                file_size = os.path.getsize(path)
+                model_entry = {
+                    'name': model_info['id'],  # Friendly name
+                    'friendly_name': model_info['id'],
+                    'filename': model_info['filename'],
+                    'path': path,
+                    'context_size': model_info['context_size'],
+                    'size_bytes': file_size,
+                    'size_mb': round(file_size / (1024 * 1024), 2),
+                    'loaded': (model_info['id'] == self.current_model_name or 
+                              model_info['filename'].replace('.rkllm', '') == self.current_model_name),
+                    'object': 'model',
+                    'owned_by': 'rkllm'
+                }
+                unique_models.append(model_entry)
+                seen_paths.add(path)
+        
+        return sorted(unique_models, key=lambda x: x['size_bytes'])
+    
+    def get_model_path(self, model_name: str) -> Optional[str]:
+        """
+        Get full path for a model by friendly name, filename, or normalized name
+        
+        Args:
+            model_name: Model identifier (friendly name, filename, or normalized)
+                - Friendly: "qwen3-0.6b"
+                - Filename: "Qwen_Qwen3-0.6B-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm"
+                - Normalized: "Qwen_Qwen3-0.6B-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588"
+        
+        Returns:
+            Full path to model file, or None if not found
+        """
+        # Use the cache lookup
+        return self.find_model_path(model_name)
     
     def is_model_loaded(self) -> bool:
         """Check if any model is currently loaded"""
@@ -110,8 +219,8 @@ class ModelManager:
         Load a model into memory
         
         Args:
-            model_name: Name of model to load
-            max_context_len: Maximum context length (default from settings)
+            model_name: Name of model to load (can be friendly name, filename, or full path)
+            max_context_len: Maximum context length (auto-detected from model if not provided)
             num_npu_core: Number of NPU cores to use (default from settings)
             
         Returns:
@@ -123,26 +232,60 @@ class ModelManager:
         """
         with self._lock:
             try:
-                # Get model path
-                model_path = self.get_model_path(model_name)
-                if not model_path:
+                # Get model details (handles friendly names, filenames, etc.)
+                model_details = self.get_model_details(model_name)
+                if not model_details:
                     raise ValueError(f"Model not found: {model_name}")
                 
-                # Unload current model if any
-                if self.current_model is not None:
-                    logger.info(f"Unloading current model: {self.current_model_name}")
-                    self.unload_model()
+                model_path = model_details['path']
+                friendly_name = model_details['id']
+                detected_context = model_details['context_size']
                 
-                # Use defaults from settings if not provided
+                # Check if this model is already loaded
+                if self.current_model is not None and self.current_model_name == friendly_name:
+                    logger.info(f"Model '{friendly_name}' is already loaded, skipping reload")
+                    return True
+                
+                # If a different model is already loaded, unload it first
+                if self.current_model is not None:
+                    logger.info(f"Unloading current model '{self.current_model_name}' to load '{friendly_name}'")
+                    try:
+                        self.unload_model()
+                    except Exception as e:
+                        logger.error(f"Failed to unload current model: {e}")
+                        # Continue anyway - try to load new model
+                        self.current_model = None
+                        self.current_model_name = None
+                
+                # Use detected context size if not explicitly provided
+                if max_context_len is None:
+                    max_context_len = detected_context
+                    logger.info(f"Using detected context size: {max_context_len} tokens")
+                else:
+                    # Warn if requested context exceeds model's capability
+                    if max_context_len > detected_context:
+                        logger.warning(
+                            f"Requested context length ({max_context_len}) exceeds "
+                            f"model's built-in context size ({detected_context}). "
+                            f"Using detected context size."
+                        )
+                        max_context_len = detected_context
+                
+                # Ensure max_context_len is set
                 if max_context_len is None:
                     max_context_len = settings.max_context_len
+                    logger.warning(f"Could not detect context size, using default: {max_context_len}")
+                
+                # Use default NPU cores from settings if not provided
                 if num_npu_core is None:
                     num_npu_core = settings.num_npu_core
                 
-                logger.info(f"Loading model: {model_name}")
+                logger.info(f"Loading model: {friendly_name}")
+                logger.info(f"  Full name: {model_details['filename']}")
                 logger.info(f"  Path: {model_path}")
-                logger.info(f"  Context length: {max_context_len}")
+                logger.info(f"  Context size: {max_context_len} tokens (detected: {detected_context})")
                 logger.info(f"  NPU cores: {num_npu_core}")
+                logger.info(f"  NOTE: This model will stay loaded until server restart")
                 
                 # Create and load model
                 model = RKLLMModel(
@@ -155,11 +298,11 @@ class ModelManager:
                     num_npu_core=num_npu_core
                 )
                 
-                # Store loaded model
+                # Store loaded model with friendly name
                 self.current_model = model
-                self.current_model_name = model_name.replace('.rkllm', '')
+                self.current_model_name = friendly_name
                 
-                logger.info(f"✅ Model loaded successfully: {self.current_model_name}")
+                logger.info(f"✅ Model loaded successfully: {friendly_name}")
                 return True
                 
             except Exception as e:
@@ -208,13 +351,18 @@ class ModelManager:
         Returns:
             Dictionary with model info or None if no model loaded
         """
-        if self.current_model is None:
+        if self.current_model is None or self.current_model_name is None:
             return None
         
+        # Get full details from cache
+        model_details = self.get_model_details(self.current_model_name)
+        
         return {
-            'name': self.current_model_name,
+            'name': self.current_model_name,  # Friendly name
             'path': self.current_model.model_path,
-            'loaded': True
+            'loaded': True,
+            'context_size': model_details['context_size'] if model_details else None,
+            'filename': model_details['filename'] if model_details else None
         }
 
 

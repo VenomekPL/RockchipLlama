@@ -137,5 +137,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level,
-        reload=True  # Enable auto-reload for development
+        reload=False  # Disable auto-reload for stable operation
     )

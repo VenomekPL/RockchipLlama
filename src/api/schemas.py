@@ -84,6 +84,7 @@ class ChatCompletionChunk(BaseModel):
     created: int
     model: str
     choices: List[Dict[str, Any]]
+    usage: Optional[Dict[str, Any]] = None  # Performance stats in final chunk
 
 
 class ModelInfo(BaseModel):

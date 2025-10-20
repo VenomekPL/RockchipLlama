@@ -142,6 +142,7 @@ class RKLLMModel:
     # Global callback storage
     _callback_storage = {}
     _callback_lock = threading.Lock()
+    _unloading = False
     
     def __init__(self, model_path: str, lib_path: str = "/usr/lib/librkllmrt.so"):
         """
@@ -212,46 +213,55 @@ class RKLLMModel:
             num_npu_core: Number of NPU cores to use (RK3588 has 3)
         """
         try:
+            # Load inference configuration
+            from config.settings import inference_config
+            
             logger.info(f"Loading REAL RKLLM model: {self.model_path}")
             logger.info(f"  Max context: {max_context_len}, NPU cores: {num_npu_core}")
+            
+            # Get config params
+            inf_params = inference_config['inference_params']
+            hw_params = inference_config['hardware']
+            
+            logger.info(f"  Using config: top_k={inf_params['top_k']}, repeat_penalty={inf_params['repeat_penalty']}")
             
             # Create parameters
             rkllm_param = RKLLMParam()
             rkllm_param.model_path = self.model_path.encode('utf-8')
-            rkllm_param.max_context_len = max_context_len
-            rkllm_param.max_new_tokens = 4096
-            rkllm_param.skip_special_token = True
+            rkllm_param.max_context_len = inf_params.get('max_context_len', max_context_len)
+            rkllm_param.max_new_tokens = inf_params.get('max_new_tokens', 4096)
+            rkllm_param.skip_special_token = inf_params.get('skip_special_token', True)
             rkllm_param.n_keep = -1
             
-            # Sampling parameters - using user's preference
-            rkllm_param.top_k = 20  # User requested 20
-            rkllm_param.top_p = 0.9
-            rkllm_param.temperature = 0.8
-            rkllm_param.repeat_penalty = 1.1
-            rkllm_param.frequency_penalty = 0.0
-            rkllm_param.presence_penalty = 0.0
+            # Sampling parameters - from config file
+            rkllm_param.top_k = inf_params['top_k']
+            rkllm_param.top_p = inf_params['top_p']
+            rkllm_param.temperature = inf_params['temperature']
+            rkllm_param.repeat_penalty = inf_params['repeat_penalty']
+            rkllm_param.frequency_penalty = inf_params.get('frequency_penalty', 0.0)
+            rkllm_param.presence_penalty = inf_params.get('presence_penalty', 0.0)
             
-            # Mirostat (disabled by default)
-            rkllm_param.mirostat = 0
-            rkllm_param.mirostat_tau = 5.0
-            rkllm_param.mirostat_eta = 0.1
+            # Mirostat - from config
+            rkllm_param.mirostat = inf_params.get('mirostat', 0)
+            rkllm_param.mirostat_tau = inf_params.get('mirostat_tau', 5.0)
+            rkllm_param.mirostat_eta = inf_params.get('mirostat_eta', 0.1)
             
-            # Async mode
-            rkllm_param.is_async = False
+            # Async mode - from config
+            rkllm_param.is_async = inf_params.get('is_async', False)
             
             # Image parameters (empty for text-only)
             rkllm_param.img_start = b""
             rkllm_param.img_end = b""
             rkllm_param.img_content = b""
             
-            # Extended parameters
+            # Extended parameters - from config
             rkllm_param.extend_param.base_domain_id = 0
             rkllm_param.extend_param.embed_flash = 1  # Store embeddings in flash
             rkllm_param.extend_param.n_batch = 1
             rkllm_param.extend_param.use_cross_attn = 0
-            rkllm_param.extend_param.enabled_cpus_num = 4
-            # RK3588: use big cores (4-7)
-            rkllm_param.extend_param.enabled_cpus_mask = (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7)
+            rkllm_param.extend_param.enabled_cpus_num = hw_params.get('num_threads', 4)
+            # Use CPU mask from config (default: RK3588 big cores 4-7)
+            rkllm_param.extend_param.enabled_cpus_mask = hw_params.get('enabled_cpus_mask', 0xF0)
             
             # Create callback
             callback_type = ctypes.CFUNCTYPE(
@@ -371,14 +381,27 @@ class RKLLMModel:
             raise
     
     def unload(self):
-        """Unload model and free NPU resources"""
+        """Unload model and free NPU resources
+        
+        WARNING: Based on official RKLLM examples, rkllm_destroy() should only 
+        be called on server shutdown, not during runtime. Calling it during runtime
+        can cause hanging issues. Model swapping is not officially supported.
+        """
         if self.handle:
             try:
+                logger.warning("Attempting to unload RKLLM model - this may cause issues!")
+                logger.warning("Official RKLLM pattern: one model per server lifetime")
+                
+                # Set a flag to prevent new inference calls
+                self._unloading = True
+                
                 rkllm_destroy = self.lib.rkllm_destroy
                 rkllm_destroy.argtypes = [RKLLM_Handle_t]
                 rkllm_destroy.restype = ctypes.c_int
                 
+                logger.info("Calling rkllm_destroy...")
                 ret = rkllm_destroy(self.handle)
+                
                 if ret == 0:
                     logger.info("Model unloaded successfully")
                 else:
@@ -390,8 +413,10 @@ class RKLLMModel:
                         del self._callback_storage[id(self)]
                 
                 self.handle = None
+                self._unloading = False
             except Exception as e:
                 logger.error(f"Error during unload: {e}")
+                self._unloading = False
     
     def __enter__(self):
         """Context manager entry"""

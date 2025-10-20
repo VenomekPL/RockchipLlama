@@ -254,8 +254,9 @@ class BenchmarkRunner:
             if metrics.ttft_ms == 0:
                 metrics.ttft_ms = metrics.total_time_ms
             
-            # Calculate generation time
-            metrics.generate_time_ms = metrics.total_time_ms - metrics.ttft_ms
+            # Calculate generation time only if not provided by RKLLM perf stats
+            if metrics.generate_time_ms == 0:
+                metrics.generate_time_ms = metrics.total_time_ms - metrics.ttft_ms
             
             # Store response
             metrics.response_text = ''.join(response_chunks)

@@ -1,0 +1,33 @@
+{
+  "description": "RKLLM inference parameters configuration",
+  "model_defaults": {
+    "max_context_len": 16384,
+    "max_new_tokens": 4096
+  },
+  "inference_params": {
+    "top_k": 20,
+    "top_p": 0.95,
+    "temperature": 0.6,
+    "repeat_penalty": 0.9,
+    "frequency_penalty": 0.6,
+    "presence_penalty": 0.1,
+    "mirostat": 0,
+    "mirostat_tau": 5.0,
+    "mirostat_eta": 0.1
+  },
+  "hardware": {
+    "num_npu_cores": 3,
+    "enabled_cpus_num": 4,
+    "enabled_cpus_mask": 240,
+    "base_domain_id": 0,
+    "embed_flash": 1,
+    "n_batch": 1
+  },
+  "notes": {
+    "top_k": "1 = greedy (most deterministic), -1 = disabled, higher = more random",
+    "top_p": "Nucleus sampling, 0.9 is standard",
+    "temperature": "0.8 is balanced, lower = more focused, higher = more creative",
+    "repeat_penalty": "0.9 = less repetition (< 1.0), 1.0 = no penalty, > 1.0 = penalize repetition",
+    "enabled_cpus_mask": "240 = 0xF0 = big cores 4-7 on RK3588"
+  }
+}
