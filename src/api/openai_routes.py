@@ -151,6 +151,18 @@ async def create_chat_completion(request: ChatCompletionRequest):
         # Format messages into prompt
         prompt = format_chat_prompt(request.messages)
         
+        # Setup binary cache if requested
+        binary_cache_path = None
+        cache_used = False
+        if request.use_cache:
+            cache_mgr = current_model.cache_manager
+            if cache_mgr.cache_exists(request.model, request.use_cache):
+                binary_cache_path = cache_mgr.get_cache_path(request.model, request.use_cache)
+                cache_used = True
+                logger.info(f"🔥 Loading binary cache: {request.use_cache}")
+            else:
+                logger.warning(f"Cache '{request.use_cache}' not found, proceeding without cache")
+        
         # Generate completion ID and timestamp
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created_time = int(time.time())
@@ -162,7 +174,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
                     prompt=prompt,
                     request=request,
                     completion_id=completion_id,
-                    created_time=created_time
+                    created_time=created_time,
+                    binary_cache_path=binary_cache_path
                 ),
                 media_type="text/event-stream"
             )
@@ -174,7 +187,9 @@ async def create_chat_completion(request: ChatCompletionRequest):
             temperature=request.temperature or 0.8,
             top_p=request.top_p or 0.9,
             top_k=request.top_k or 20,  # User preference: 20
-            repeat_penalty=getattr(request, 'repeat_penalty', None) or 1.1
+            repeat_penalty=getattr(request, 'repeat_penalty', None) or 1.1,
+            binary_cache_path=binary_cache_path,
+            save_binary_cache=False  # Load, don't save
         )
         
         # Log performance stats if available
@@ -202,7 +217,9 @@ async def create_chat_completion(request: ChatCompletionRequest):
             usage=Usage(
                 prompt_tokens=len(prompt.split()),  # Rough estimate
                 completion_tokens=len(generated_text.split()),  # Rough estimate
-                total_tokens=len(prompt.split()) + len(generated_text.split())
+                total_tokens=len(prompt.split()) + len(generated_text.split()),
+                cache_hit=cache_used,
+                cached_prompts=[request.use_cache] if cache_used else None
             )
         )
         
@@ -218,7 +235,7 @@ async def stream_chat_completion(
     request: ChatCompletionRequest,
     completion_id: str,
     created_time: int,
-    loaded_cache_names: Optional[List[str]] = None
+    binary_cache_path: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Stream chat completion tokens
@@ -226,7 +243,7 @@ async def stream_chat_completion(
     Yields SSE-formatted chunks
     
     Args:
-        loaded_cache_names: List of cache names that were applied to the prompt
+        binary_cache_path: Path to binary cache file to load
     """
     try:
         # Buffer for collecting generated text
@@ -267,7 +284,9 @@ async def stream_chat_completion(
             top_p=request.top_p or 0.9,
             top_k=request.top_k or 20,  # User preference: 20
             repeat_penalty=getattr(request, 'repeat_penalty', None) or 1.1,
-            callback=streaming_callback
+            callback=streaming_callback,
+            binary_cache_path=binary_cache_path,
+            save_binary_cache=False  # Load, don't save
         )
         
         # Yield all buffered chunks
@@ -329,6 +348,18 @@ async def create_completion(request: CompletionRequest):
         # Ensure model is loaded
         current_model = await ensure_model_loaded(preferred_model=request.model)
         
+        # Setup binary cache if requested
+        binary_cache_path = None
+        cache_used = False
+        if request.use_cache:
+            cache_mgr = current_model.cache_manager
+            if cache_mgr.cache_exists(request.model, request.use_cache):
+                binary_cache_path = cache_mgr.get_cache_path(request.model, request.use_cache)
+                cache_used = True
+                logger.info(f"🔥 Loading binary cache: {request.use_cache}")
+            else:
+                logger.warning(f"Cache '{request.use_cache}' not found, proceeding without cache")
+        
         # Generate completion ID and timestamp
         completion_id = f"cmpl-{uuid.uuid4().hex[:12]}"
         created_time = int(time.time())
@@ -347,7 +378,9 @@ async def create_completion(request: CompletionRequest):
             temperature=request.temperature or 0.8,
             top_p=request.top_p or 0.9,
             top_k=request.top_k or 20,
-            repeat_penalty=request.repeat_penalty or 1.1
+            repeat_penalty=request.repeat_penalty or 1.1,
+            binary_cache_path=binary_cache_path,
+            save_binary_cache=False  # Load, don't save
         )
         
         # Log performance stats if available
@@ -372,7 +405,9 @@ async def create_completion(request: CompletionRequest):
             usage=Usage(
                 prompt_tokens=len(request.prompt.split()),  # Rough estimate
                 completion_tokens=len(generated_text.split()),  # Rough estimate
-                total_tokens=len(request.prompt.split()) + len(generated_text.split())
+                total_tokens=len(request.prompt.split()) + len(generated_text.split()),
+                cache_hit=cache_used,
+                cached_prompts=[request.use_cache] if cache_used else None
             )
         )
         

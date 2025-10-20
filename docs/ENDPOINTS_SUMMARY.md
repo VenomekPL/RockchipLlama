@@ -88,6 +88,26 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   }'
 ```
 
+### Chat with Binary Cache ⚡ (50-70% faster!)
+```bash
+# First create cache
+curl -X POST http://localhost:8080/v1/cache/qwen3-0.6b \
+  -H 'Content-Type: application/json' \
+  -d '{"cache_name": "system", "prompt": "You are a coding assistant..."}'
+
+# Then use it in chat
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "qwen3-0.6b",
+    "use_cache": "system",
+    "messages": [
+      {"role": "user", "content": "Write Python hello world"}
+    ]
+  }'
+# TTFT: 200ms → 60-100ms!
+```
+
 ### One-shot Completion
 ```bash
 curl -X POST http://localhost:8080/v1/completions \

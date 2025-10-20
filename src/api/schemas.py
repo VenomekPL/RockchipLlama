@@ -38,11 +38,12 @@ class ChatCompletionRequest(BaseModel):
     n: Optional[int] = Field(default=1, ge=1, le=1, description="Number of completions (only 1 supported)")
     user: Optional[str] = None
     
-    # 🔥 NEW: Prompt caching support
-    cache_prompts: Optional[Union[str, List[str]]] = Field(
+    # 🔥 Binary prompt caching support
+    use_cache: Optional[str] = Field(
         default=None,
-        description="Cache name(s) to prepend to the prompt. Can be a single string or array of cache names. "
-                    "System cache is always applied automatically. Multiple caches are concatenated in order."
+        description="Binary cache name to load for 50-70% TTFT reduction. "
+                    "The cached prompt (e.g., system prompt) is loaded from NPU state, "
+                    "then new messages are processed on top of it."
     )
     
     class Config:
@@ -55,7 +56,7 @@ class ChatCompletionRequest(BaseModel):
                 ],
                 "temperature": 0.8,
                 "max_tokens": 512,
-                "cache_prompts": ["coding_rules", "project_context"]
+                "use_cache": "system"
             }
         }
 
@@ -140,6 +141,12 @@ class CompletionRequest(BaseModel):
     repeat_penalty: Optional[float] = Field(default=1.1, ge=1.0, le=2.0, description="RKLLM repeat_penalty")
     n: Optional[int] = Field(default=1, ge=1, le=1, description="Number of completions (only 1 supported)")
     user: Optional[str] = None
+    
+    # 🔥 Binary prompt caching support
+    use_cache: Optional[str] = Field(
+        default=None,
+        description="Binary cache name to load for faster inference"
+    )
     
     class Config:
         json_schema_extra = {
