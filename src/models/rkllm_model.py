@@ -97,6 +97,14 @@ class RKLLMInput(ctypes.Structure):
         ("input_data", RKLLMInputUnion)
     ]
 
+class RKLLMPromptCacheParam(ctypes.Structure):
+    """RKLLM Prompt Cache Parameter - for binary NPU state caching"""
+    _fields_ = [
+        ("prompt_cache_path", ctypes.c_char_p),  # Path to binary cache file
+        ("save_prompt_cache", ctypes.c_int),     # 1=save, 0=load
+        ("num_input", ctypes.c_int)              # Number of input tokens
+    ]
+
 class RKLLMInferParam(ctypes.Structure):
     _fields_ = [
         ("mode", ctypes.c_int),
@@ -364,7 +372,9 @@ class RKLLMModel:
         top_p: float = 0.9,
         top_k: int = 20,  # User preference
         repeat_penalty: float = 1.1,
-        callback: Optional[Callable[[str], None]] = None
+        callback: Optional[Callable[[str], None]] = None,
+        binary_cache_path: Optional[str] = None,
+        save_binary_cache: bool = False
     ) -> tuple[str, Optional[dict]]:
         """
         Generate text completion using REAL NPU
@@ -377,9 +387,11 @@ class RKLLMModel:
             top_k: Top-k sampling parameter (user set to 20)
             repeat_penalty: Repetition penalty
             callback: Optional streaming callback function
+            binary_cache_path: Path to binary cache file (.rkllm_cache)
+            save_binary_cache: If True, save NPU state to binary_cache_path after prefill
             
         Returns:
-            Generated text
+            (Generated text, performance stats dict)
         """
         if not self.handle:
             raise RuntimeError("Model not loaded. Call load() first.")
@@ -387,6 +399,10 @@ class RKLLMModel:
         try:
             logger.info(f"Running REAL NPU inference...")
             logger.debug(f"Prompt length: {len(prompt)} chars")
+            
+            if binary_cache_path:
+                action = "Saving to" if save_binary_cache else "Loading from"
+                logger.info(f"🔥 Binary cache: {action} {binary_cache_path}")
             
             # Reset state
             self.generated_text = []
@@ -404,8 +420,22 @@ class RKLLMModel:
             infer_params = RKLLMInferParam()
             infer_params.mode = RKLLMInferMode.RKLLM_INFER_GENERATE
             infer_params.lora_params = None
-            infer_params.prompt_cache_params = None
             infer_params.keep_history = 0  # Don't keep history
+            
+            # Setup binary prompt cache if provided
+            prompt_cache = None
+            if binary_cache_path:
+                prompt_cache = RKLLMPromptCacheParam()
+                prompt_cache.prompt_cache_path = binary_cache_path.encode('utf-8')
+                prompt_cache.save_prompt_cache = 1 if save_binary_cache else 0
+                prompt_cache.num_input = len(prompt)  # Approximate token count
+                infer_params.prompt_cache_params = ctypes.cast(
+                    ctypes.pointer(prompt_cache),
+                    ctypes.c_void_p
+                )
+                logger.debug(f"Binary cache configured: save={save_binary_cache}, tokens≈{len(prompt)}")
+            else:
+                infer_params.prompt_cache_params = None
             
             # Run inference
             rkllm_run = self.lib.rkllm_run
@@ -426,6 +456,14 @@ class RKLLMModel:
             
             if ret != 0:
                 raise RuntimeError(f"rkllm_run failed with code: {ret}")
+            
+            # Log binary cache result
+            if binary_cache_path and save_binary_cache:
+                if os.path.exists(binary_cache_path):
+                    size_mb = os.path.getsize(binary_cache_path) / (1024 * 1024)
+                    logger.info(f"✅ Binary cache saved: {size_mb:.2f} MB")
+                else:
+                    logger.warning(f"⚠️  Binary cache not created at {binary_cache_path}")
             
             # Return generated text and perf stats
             result = ''.join(self.generated_text)

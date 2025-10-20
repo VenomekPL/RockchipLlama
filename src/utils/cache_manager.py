@@ -296,3 +296,77 @@ class PromptCacheManager:
             print(f"[CACHE] Combined {len(loaded_caches)} caches: {', '.join(loaded_caches)} ({len(combined)} total chars)")
         
         return combined, loaded_caches
+    
+    # Binary Cache Methods
+    
+    def get_binary_cache_path(self, model_name: str, cache_name: str) -> str:
+        """
+        Get the path to a binary cache file (.rkllm_cache)
+        
+        Args:
+            model_name: Friendly model name
+            cache_name: Cache identifier
+            
+        Returns:
+            Absolute path to binary cache file
+        """
+        cache_dir = self._get_model_cache_dir(model_name)
+        return str(cache_dir / f"{cache_name}.rkllm_cache")
+    
+    def binary_cache_exists(self, model_name: str, cache_name: str) -> bool:
+        """Check if a binary cache file exists"""
+        path = self.get_binary_cache_path(model_name, cache_name)
+        return os.path.exists(path)
+    
+    def get_binary_cache_info(self, model_name: str, cache_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get information about a binary cache file
+        
+        Returns:
+            Dictionary with size_mb, created_at, or None if doesn't exist
+        """
+        path = self.get_binary_cache_path(model_name, cache_name)
+        if not os.path.exists(path):
+            return None
+        
+        stat = os.stat(path)
+        return {
+            "cache_name": cache_name,
+            "model_name": model_name,
+            "path": path,
+            "size_mb": stat.st_size / (1024 * 1024),
+            "created_at": stat.st_ctime,
+            "modified_at": stat.st_mtime
+        }
+    
+    def delete_binary_cache(self, model_name: str, cache_name: str) -> bool:
+        """
+        Delete a binary cache file
+        
+        Returns:
+            True if deleted, False if didn't exist
+        """
+        path = self.get_binary_cache_path(model_name, cache_name)
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"[CACHE] Deleted binary cache: {cache_name}")
+            return True
+        return False
+    
+    def list_binary_caches(self, model_name: str) -> List[Dict[str, Any]]:
+        """
+        List all binary cache files for a model
+        
+        Returns:
+            List of dictionaries with cache information
+        """
+        cache_dir = self._get_model_cache_dir(model_name)
+        binary_caches = []
+        
+        for cache_file in cache_dir.glob("*.rkllm_cache"):
+            cache_name = cache_file.stem
+            info = self.get_binary_cache_info(model_name, cache_name)
+            if info:
+                binary_caches.append(info)
+        
+        return binary_caches
