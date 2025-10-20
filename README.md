@@ -28,18 +28,27 @@ This project provides a REST API server that leverages Rockchip's Neural Process
 - ✅ Smart model loading (skips reload if same model)
 - ✅ GPU acceleration + 4-thread big core optimization (RK3588)
 
-**Benchmark Results (RK3588 NPU):**
-- ⭐ **Qwen3-4B** (NEW!): 3.13 tokens/sec, 16K context, 5027 MB RAM - **BEST QUALITY**
-  - 6/10 tests completed (4 timeouts with 300s limit)
-  - Re-running with NO timeout (3600s) to complete all tests
-- ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM - **BEST SPEED**
-- ✅ **Gemma3-1B**: 13.50 tokens/sec, 4K context, 1243 MB RAM (needs 16K reconversion)
+**Benchmark Results (RK3588 NPU @ Max Frequency):**
+- ✅ **Qwen3-0.6B**: 15.59 tokens/sec, 16K context, 890 MB RAM - **RECOMMENDED** (Best balance)
+- ✅ **Gemma3-1B**: 13.50 tokens/sec, 4K context, 1243 MB RAM - **USABLE** (Needs 16K reconversion)
+- ⚠️ **Qwen3-4B**: 3.13 tokens/sec, 16K context, 5027 MB RAM - **TOO SLOW** (Production requires ≥5 tok/s)
 - ❌ **Gemma3-270m**: ~~29.80 tokens/sec~~ - **REMOVED** (produces garbage output)
 
+**Production Requirements:**
+- Minimum viable speed: **5 tokens/sec** for acceptable UX
+- Current hardware (RK3588 @ max freq): Best for 0.5B-1.5B models
+- Qwen3-4B excellent quality but too slow for production use
+
+**Hardware Status:**
+- ✅ NPU: 1.0 GHz (max frequency)
+- ✅ CPU Big Cores: 2.3 GHz (max frequency)
+- ✅ GPU: 1.0 GHz (max frequency)
+- ✅ Already optimized with frequency locking script
+
 **Current Focus:**
-- 🔄 **ACTIVE**: Re-benchmarking Qwen3-4B with 1-hour timeout to complete all 10 tests
 - 🔄 Testing extended context capabilities (up to 16K)
 - 🔄 Model reconversion for consistent 16K context support
+- 🔄 Exploring 1.5B-2B model range for quality/speed balance
 
 **Next Enhancements:**
 - ⏳ Prompt caching system for improved TTFT
