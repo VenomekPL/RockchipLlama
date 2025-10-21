@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from api.openai_routes import router as openai_router
 from api.model_routes import router as model_router
+from api.ollama_routes import router as ollama_router
 from config.settings import settings
 from models.rkllm_model import RKLLMModel
 from models.model_manager import model_manager
@@ -51,6 +52,7 @@ app.add_middleware(
 # Include routers
 app.include_router(openai_router)
 app.include_router(model_router)
+app.include_router(ollama_router)
 
 
 @app.on_event("startup")
@@ -100,6 +102,9 @@ async def root():
         "endpoints": {
             "openai_chat": "/v1/chat/completions",
             "openai_models": "/v1/models",
+            "ollama_generate": "/api/generate",
+            "ollama_chat": "/api/chat",
+            "ollama_tags": "/api/tags",
             "model_management": {
                 "load": "/v1/models/load",
                 "unload": "/v1/models/unload",

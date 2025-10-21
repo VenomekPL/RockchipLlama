@@ -203,6 +203,7 @@ class RKLLMModel:
     def _callback_impl(self, result, userdata, state):
         """Internal callback for RKLLM - called from C library"""
         try:
+            logger.info(f"🔔 Callback called: state={state}")
             if state == LLMCallState.RKLLM_RUN_FINISH:
                 self.generation_state = state
                 # Extract final performance stats
@@ -219,17 +220,27 @@ class RKLLMModel:
                 logger.debug("Generation finished")
             elif state == LLMCallState.RKLLM_RUN_ERROR:
                 self.generation_state = state
-                logger.error("Generation error")
+                logger.error("❌ Generation error in callback")
             elif state == LLMCallState.RKLLM_RUN_NORMAL:
                 self.generation_state = state
-                if result.contents.text:
-                    text = result.contents.text.decode('utf-8')
-                    self.generated_text.append(text)
-                    # Call user callback if set
-                    if self.current_callback:
-                        self.current_callback(text)
+                logger.info(f"📝 RKLLM_RUN_NORMAL: result={result}, contents={result.contents if result else 'None'}")
+                if result and result.contents:
+                    text_ptr = result.contents.text
+                    logger.info(f"📝 text_ptr={text_ptr}, type={type(text_ptr)}")
+                    if text_ptr is not None:
+                        text = text_ptr.decode('utf-8') if isinstance(text_ptr, bytes) else str(text_ptr)
+                        logger.info(f"📝 Got text token: {repr(text)} (len={len(text)})")
+                        if text:  # Only append if non-empty
+                            self.generated_text.append(text)
+                            # Call user callback if set
+                            if self.current_callback:
+                                self.current_callback(text)
+                    else:
+                        logger.warning("⚠️  RKLLM_RUN_NORMAL but text_ptr is None")
+                else:
+                    logger.warning("⚠️  RKLLM_RUN_NORMAL but no result or contents")
         except Exception as e:
-            logger.error(f"Error in callback: {e}")
+            logger.error(f"Error in callback: {e}", exc_info=True)
         return 0
         
     def load(self, max_context_len: int = 512, num_npu_core: int = 3):
@@ -264,11 +275,15 @@ class RKLLMModel:
             rkllm_param.skip_special_token = model_defaults.get('skip_special_token', True)
             rkllm_param.n_keep = model_defaults.get('n_keep', -1)
             
+            logger.info(f"  📝 max_new_tokens={rkllm_param.max_new_tokens}, max_context_len={rkllm_param.max_context_len}")
+            
             # Sampling parameters - from config file
             rkllm_param.top_k = inf_params['top_k']
             rkllm_param.top_p = inf_params['top_p']
             rkllm_param.temperature = inf_params['temperature']
             rkllm_param.repeat_penalty = inf_params['repeat_penalty']
+            
+            logger.info(f"  🎲 temperature={rkllm_param.temperature}, top_p={rkllm_param.top_p}, top_k={rkllm_param.top_k}")
             rkllm_param.frequency_penalty = inf_params.get('frequency_penalty', 0.0)
             rkllm_param.presence_penalty = inf_params.get('presence_penalty', 0.0)
             
@@ -279,6 +294,7 @@ class RKLLMModel:
             
             # Async mode - from config
             rkllm_param.is_async = model_defaults.get('is_async', False)
+            logger.info(f"  🔄 is_async mode: {rkllm_param.is_async}")
             
             # Image parameters (empty for text-only)
             rkllm_param.img_start = b""
@@ -466,10 +482,15 @@ class RKLLMModel:
                 rkllm_is_running.argtypes = [RKLLM_Handle_t]
                 rkllm_is_running.restype = ctypes.c_int
                 
-                logger.debug("⏳ Waiting for async inference to complete...")
-                while rkllm_is_running(self.handle) == 0:  # 0 = still running
+                logger.info("⏳ Waiting for async inference to complete...")
+                # Give it a moment to start
+                time.sleep(0.01)  # 10ms initial delay
+                # NOTE: rkllm_is_running returns 1 while running, 0 when done
+                poll_count = 0
+                while rkllm_is_running(self.handle) == 1:  # 1 = still running
                     time.sleep(0.001)  # Poll every 1ms
-                logger.debug("✅ Async inference complete")
+                    poll_count += 1
+                logger.info(f"✅ Async inference complete (polled {poll_count} times)")
             
             # Log binary cache result
             if binary_cache_path and save_binary_cache:
@@ -480,8 +501,9 @@ class RKLLMModel:
                     logger.warning(f"⚠️  Binary cache not created at {binary_cache_path}")
             
             # Return generated text and perf stats
+            logger.info(f"📦 generated_text list has {len(self.generated_text)} items: {self.generated_text[:5]}")
             result = ''.join(self.generated_text)
-            logger.info(f"Generated {len(result)} characters")
+            logger.info(f"Generated {len(result)} characters: {repr(result[:100])}")
             
             # Return tuple: (text, perf_stats)
             return result, self.perf_stats

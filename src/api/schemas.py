@@ -174,3 +174,79 @@ class CompletionResponse(BaseModel):
     model: str = Field(description="Model used")
     choices: List[CompletionChoice]
     usage: Usage
+
+
+# ============================================================================
+# OLLAMA API SCHEMAS
+# ============================================================================
+
+class OllamaGenerateRequest(BaseModel):
+    """Ollama-compatible generate request"""
+    model: str = Field(..., description="Model name")
+    prompt: str = Field(..., description="The prompt to generate from")
+    stream: Optional[bool] = Field(default=False, description="Enable streaming")
+    options: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Model options (num_predict, temperature, top_k, top_p, etc.)"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "model": "qwen3-0.6b",
+                "prompt": "Why is the sky blue?",
+                "stream": False,
+                "options": {
+                    "temperature": 0.8,
+                    "num_predict": 256
+                }
+            }
+        }
+
+
+class OllamaGenerateResponse(BaseModel):
+    """Ollama-compatible generate response"""
+    model: str
+    created_at: str = Field(description="ISO 8601 timestamp")
+    response: str = Field(description="Generated text")
+    done: bool = Field(default=True)
+    context: Optional[List[int]] = Field(default=None, description="Token context")
+    total_duration: Optional[int] = Field(default=None, description="Total time in nanoseconds")
+    load_duration: Optional[int] = Field(default=None, description="Model load time in nanoseconds")
+    prompt_eval_count: Optional[int] = Field(default=None, description="Number of tokens in prompt")
+    prompt_eval_duration: Optional[int] = Field(default=None, description="Prompt evaluation time")
+    eval_count: Optional[int] = Field(default=None, description="Number of tokens generated")
+    eval_duration: Optional[int] = Field(default=None, description="Generation time in nanoseconds")
+
+
+class OllamaChatRequest(BaseModel):
+    """Ollama-compatible chat request"""
+    model: str = Field(..., description="Model name")
+    messages: List[ChatMessage] = Field(..., description="Chat messages")
+    stream: Optional[bool] = Field(default=False, description="Enable streaming")
+    options: Optional[Dict[str, Any]] = Field(default=None, description="Model options")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "model": "qwen3-0.6b",
+                "messages": [
+                    {"role": "user", "content": "Hello!"}
+                ],
+                "stream": False
+            }
+        }
+
+
+class OllamaChatResponse(BaseModel):
+    """Ollama-compatible chat response"""
+    model: str
+    created_at: str
+    message: ChatMessage
+    done: bool = Field(default=True)
+    total_duration: Optional[int] = None
+    load_duration: Optional[int] = None
+    prompt_eval_count: Optional[int] = None
+    prompt_eval_duration: Optional[int] = None
+    eval_count: Optional[int] = None
+    eval_duration: Optional[int] = None
