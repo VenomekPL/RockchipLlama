@@ -24,10 +24,12 @@ from api.schemas import (
     MessageRole,
     CompletionRequest,
     CompletionResponse,
-    CompletionChoice
+    CompletionChoice,
+    EmbeddingRequest,
+    EmbeddingResponse
 )
 from models.model_manager import model_manager
-from config.settings import settings
+from config.settings import settings, inference_config
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +462,112 @@ async def health_check():
         "loaded_model": model_manager.get_loaded_model_name(),
         "timestamp": int(time.time())
     }
+
+
+# ============================================================================
+# EMBEDDINGS ENDPOINT
+# ============================================================================
+# TEMPORARILY DISABLED: Embedding model (Qwen3-Embedding-0.6B) has compatibility issues
+# with current RKLLM runtime. Both our implementation and HuggingFace example crash.
+# Will re-enable when a verified compatible embedding model is available.
+# Test scripts remain in scripts/test_embeddings.py for future validation.
+# ============================================================================
+
+# @router.post("/embeddings", response_model=EmbeddingResponse)
+# async def create_embeddings(request: EmbeddingRequest):
+#     """
+#     Create embeddings for text input(s)
+#     
+#     Endpoint: POST /v1/embeddings
+#     
+#     Uses dedicated embedding model (qwen3-0.6b-embedding) to extract
+#     normalized embedding vectors. Supports batch processing.
+#     
+#     Request:
+#         {
+#             "model": "qwen3-0.6b-embedding",  // Use embedding model
+#             "input": "The quick brown fox"     // or ["text1", "text2"]
+#         }
+#     
+#     Response:
+#         {
+#             "object": "list",
+#             "data": [
+#                 {
+#                     "object": "embedding",
+#                     "embedding": [0.123, -0.456, ...],  // normalized vector
+#                     "index": 0
+#                 }
+#             ],
+#             "model": "qwen3-0.6b-embedding",
+#             "usage": {"prompt_tokens": 5, "total_tokens": 5}
+#         }
+#     """
+#     try:
+#         from src.api.adapters import openai_embedding_to_internal, internal_to_openai_embedding
+#         from src.models.inference_types import InferenceResponse
+#         
+#         logger.info(f"📥 Embedding request for model: {request.model}")
+#         
+#         # Auto-load embedding model if needed
+#         embedding_model_name = "qwen3-0.6b-embedding"
+#         current_model = model_manager.get_current_model()
+#         
+#         # Check if we need to load the embedding model
+#         if not current_model or current_model.model_name != embedding_model_name:
+#             logger.info(f"Loading embedding model: {embedding_model_name}")
+#             try:
+#                 model_manager.load_model(embedding_model_name)
+#                 current_model = model_manager.get_current_model()
+#             except Exception as e:
+#                 raise HTTPException(
+#                     status_code=503, 
+#                     detail=f"Failed to load embedding model '{embedding_model_name}': {str(e)}"
+#                 )
+#         
+#         if not current_model:
+#             raise HTTPException(status_code=503, detail="No model currently loaded")
+#         
+#         # Use the global inference_config
+#         from config.settings import inference_config as inf_config
+#         
+#         # Convert to internal format(s) - returns list of InferenceRequests
+#         internal_requests = openai_embedding_to_internal(request)
+#         
+#         logger.info(f"Processing {len(internal_requests)} embedding request(s)")
+#         
+#         # Process each request
+#         responses = []
+#         for internal_req in internal_requests:
+#             # Call model's get_embeddings method
+#             embedding_vec, stats = await current_model.get_embeddings(
+#                 text=internal_req.prompt,
+#                 inference_config=inf_config
+#             )
+#             
+#             # Create internal response
+#             internal_resp = InferenceResponse(
+#                 embedding=embedding_vec,
+#                 embedding_dim=stats.get("embedding_dim"),
+#                 tokens_processed=stats.get("tokens_processed", 0),
+#                 time_ms=stats.get("time_ms", 0.0),
+#                 request_id=internal_req.request_id
+#             )
+            
+#             responses.append(internal_resp)
+#         
+#         # Convert to OpenAI format
+#         response = internal_to_openai_embedding(responses, current_model.model_name)
+#         
+#         logger.info(f"✅ Generated {len(responses)} embedding(s)")
+#         
+#         return response
+#         
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error creating embeddings: {e}", exc_info=True)
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================

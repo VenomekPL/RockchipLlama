@@ -249,3 +249,97 @@ def internal_to_ollama_chat(
         eval_count=response.generate_tokens,
         eval_duration=eval_duration_ns
     )
+
+
+# ============================================================================
+# Embedding Adapters
+# ============================================================================
+
+def openai_embedding_to_internal(request) -> List[InferenceRequest]:
+    """
+    Convert OpenAI embedding request to internal format(s)
+    
+    OpenAI allows batch requests (input can be str or List[str]),
+    so we return a list of InferenceRequests.
+    """
+    from src.api.schemas import EmbeddingRequest
+    
+    # Normalize input to list
+    if isinstance(request.input, str):
+        inputs = [request.input]
+    else:
+        inputs = request.input
+    
+    # Create one InferenceRequest per input
+    return [
+        InferenceRequest(
+            prompt=text,
+            mode=InferenceMode.EMBEDDINGS,
+            source_api="openai",
+            request_id=f"emb-{i}"
+        )
+        for i, text in enumerate(inputs)
+    ]
+
+
+def ollama_embedding_to_internal(request) -> InferenceRequest:
+    """Convert Ollama embedding request to internal format"""
+    from src.api.schemas import OllamaEmbeddingRequest
+    
+    return InferenceRequest(
+        prompt=request.prompt,
+        mode=InferenceMode.EMBEDDINGS,
+        source_api="ollama"
+    )
+
+
+def internal_to_openai_embedding(
+    responses: List[InferenceResponse],
+    model_name: str
+) -> "EmbeddingResponse":
+    """
+    Convert internal responses to OpenAI embedding format
+    
+    Takes a list of responses (one per input text) and combines
+    them into a single OpenAI embedding response.
+    """
+    from src.api.schemas import EmbeddingResponse, EmbeddingData, EmbeddingUsage
+    
+    embedding_data = [
+        EmbeddingData(
+            object="embedding",
+            embedding=resp.embedding or [],
+            index=i
+        )
+        for i, resp in enumerate(responses)
+    ]
+    
+    total_tokens = sum(resp.tokens_processed for resp in responses)
+    
+    return EmbeddingResponse(
+        object="list",
+        data=embedding_data,
+        model=model_name,
+        usage=EmbeddingUsage(
+            prompt_tokens=total_tokens,
+            total_tokens=total_tokens
+        )
+    )
+
+
+def internal_to_ollama_embedding(
+    response: InferenceResponse,
+    model_name: str
+) -> "OllamaEmbeddingResponse":
+    """Convert internal response to Ollama embedding format"""
+    from src.api.schemas import OllamaEmbeddingResponse
+    
+    return OllamaEmbeddingResponse(
+        embedding=response.embedding or [],
+        model=model_name,
+        created_at=datetime.now().isoformat(),
+        total_duration=int(response.time_ms * 1_000_000),  # ms to ns
+        load_duration=0,
+        prompt_eval_count=response.tokens_processed
+    )
+

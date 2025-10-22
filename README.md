@@ -10,10 +10,12 @@ FastAPI server leveraging Rockchip's Neural Processing Unit (NPU) for efficient 
 
 ✅ **Production Ready** - 15.59 tok/s with Qwen3-0.6B  
 🔥 **Binary Caching** - 23.5x faster TTFT (1775ms → 75ms)  
-� **OpenAI Compatible** - Drop-in replacement for OpenAI API  
+🔌 **OpenAI Compatible** - Drop-in replacement for OpenAI API  
+🦙 **Ollama Compatible** - Full Ollama API support  
 🚀 **NPU Accelerated** - Real RKLLM runtime integration  
 📦 **Model Management** - Dynamic loading with friendly names  
 ⚙️ **Configurable** - Runtime parameter tuning without restart  
+🔄 **Queue-Based Concurrency** - Stable parallel request handling
 
 ## Quick Start
 
@@ -60,8 +62,8 @@ Binary caching reduces Time To First Token by **95.8%** for repeated prompts!
 
 **Next Steps:**
 - Phase 4.3: LongRoPE implementation (requires model rebuilding with toolkit)
-- Phase 4.4: Ollama API compatibility
-- Phase 4.5: HuggingFace integration
+- Phase 4.4: HuggingFace integration
+- Embeddings API (pending compatible RKLLM embedding model)
 
 ---
 

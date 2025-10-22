@@ -11,7 +11,8 @@ from fastapi import APIRouter, HTTPException
 from typing import Optional
 from src.api.schemas import (
     OllamaGenerateRequest, OllamaGenerateResponse,
-    OllamaChatRequest, OllamaChatResponse
+    OllamaChatRequest, OllamaChatResponse,
+    OllamaEmbeddingRequest, OllamaEmbeddingResponse
 )
 from src.api.adapters import (
     ollama_generate_to_internal,
@@ -245,3 +246,154 @@ async def ollama_list_models():
         })
     
     return {"models": models}
+
+
+# ============================================================================
+# OLLAMA EMBEDDINGS ENDPOINT
+# ============================================================================
+# TEMPORARILY DISABLED: Embedding model has compatibility issues with RKLLM runtime.
+# Will re-enable when verified compatible embedding model is available.
+# ============================================================================
+
+# @router.post("/embed", response_model=OllamaEmbeddingResponse)
+# @router.post("/embeddings", response_model=OllamaEmbeddingResponse)
+# async def ollama_embeddings(request: OllamaEmbeddingRequest):
+#     """
+#     Ollama-compatible embeddings endpoint
+#     
+#     Endpoint: POST /api/embed or POST /api/embeddings
+#     
+#     Uses dedicated Qwen3-Embedding-0.6B model for text embeddings.
+#     
+#     Request:
+#         {
+#             "model": "qwen3-0.6b-embedding",
+#             "prompt": "The quick brown fox"
+#         }
+#     
+#     Response:
+#         {
+#             "embedding": [0.123, -0.456, ...],
+#             "model": "qwen3-0.6b-embedding",
+#             "created_at": "2025-10-21T12:34:56Z",
+#             "total_duration": 150000000,  // nanoseconds
+#             "load_duration": 0,
+#             "prompt_eval_count": 5
+#         }
+#     """
+#     from src.api.adapters import ollama_embedding_to_internal, internal_to_ollama_embedding
+#     from src.models.inference_types import InferenceResponse
+#     from src.main import model_manager
+#     from config.settings import inference_config
+#     
+#     logger.info(f"📥 Ollama embedding request for model: {request.model}")
+#     
+#     try:
+#         # Always use the dedicated embedding model
+#         embedding_model_name = "qwen3-0.6b-embedding"
+#         
+#         # Load embedding model if not already loaded
+#         current_model = model_manager.get_current_model()
+#         if not current_model or current_model.model_name != embedding_model_name:
+#             logger.info(f"Loading embedding model: {embedding_model_name}")
+#             try:
+#                 model_manager.load_model(embedding_model_name)
+#                 current_model = model_manager.get_current_model()
+#             except Exception as e:
+#                 raise HTTPException(
+#                     status_code=503,
+#                     detail=f"Failed to load embedding model '{embedding_model_name}': {str(e)}"
+#                 )
+#         
+#         # Get current model
+#         current_model = model_manager.get_current_model()
+#         if not current_model:
+#             raise HTTPException(status_code=503, detail="No model loaded")
+#         
+#         # Convert to internal format
+#         internal_req = ollama_embedding_to_internal(request)
+#         
+#         # Get embeddings
+#         embedding_vec, stats = await current_model.get_embeddings(
+#             text=internal_req.prompt,
+#             inference_config=inference_config
+#         )
+#         
+#         # Create internal response
+#         internal_resp = InferenceResponse(
+#             embedding=embedding_vec,
+#             embedding_dim=stats.get("embedding_dim"),
+#             tokens_processed=stats.get("tokens_processed", 0),
+#             time_ms=stats.get("time_ms", 0.0)
+#         )
+#         
+#         # Convert to Ollama format
+#         response = internal_to_ollama_embedding(internal_resp, current_model.model_name or request.model)
+#         
+#         logger.info(f"✅ Generated {len(embedding_vec)}-dim embedding")
+#         
+#         return response
+#         
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Embedding generation failed: {e}", exc_info=True)
+#         raise HTTPException(status_code=500, detail=str(e))
+    from src.api.adapters import ollama_embedding_to_internal, internal_to_ollama_embedding
+    from src.models.inference_types import InferenceResponse
+    from src.main import model_manager
+    from config.settings import inference_config
+    
+    logger.info(f"📥 Ollama embedding request for model: {request.model}")
+    
+    try:
+        # Always use the dedicated embedding model
+        embedding_model_name = "qwen3-0.6b-embedding"
+        
+        # Load embedding model if not already loaded
+        current_model = model_manager.get_current_model()
+        if not current_model or current_model.model_name != embedding_model_name:
+            logger.info(f"Loading embedding model: {embedding_model_name}")
+            try:
+                model_manager.load_model(embedding_model_name)
+                current_model = model_manager.get_current_model()
+            except Exception as e:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Failed to load embedding model '{embedding_model_name}': {str(e)}"
+                )
+        
+        # Get current model
+        current_model = model_manager.get_current_model()
+        if not current_model:
+            raise HTTPException(status_code=503, detail="No model loaded")
+        
+        # Convert to internal format
+        internal_req = ollama_embedding_to_internal(request)
+        
+        # Get embeddings
+        embedding_vec, stats = await current_model.get_embeddings(
+            text=internal_req.prompt,
+            inference_config=inference_config
+        )
+        
+        # Create internal response
+        internal_resp = InferenceResponse(
+            embedding=embedding_vec,
+            embedding_dim=stats.get("embedding_dim"),
+            tokens_processed=stats.get("tokens_processed", 0),
+            time_ms=stats.get("time_ms", 0.0)
+        )
+        
+        # Convert to Ollama format
+        response = internal_to_ollama_embedding(internal_resp, current_model.model_name or request.model)
+        
+        logger.info(f"✅ Generated {len(embedding_vec)}-dim embedding")
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in Ollama embeddings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

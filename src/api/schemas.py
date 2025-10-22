@@ -250,3 +250,81 @@ class OllamaChatResponse(BaseModel):
     prompt_eval_duration: Optional[int] = None
     eval_count: Optional[int] = None
     eval_duration: Optional[int] = None
+
+
+# ============================================================================
+# EMBEDDING SCHEMAS (OpenAI /v1/embeddings)
+# ============================================================================
+
+class EmbeddingRequest(BaseModel):
+    """OpenAI-compatible embedding request"""
+    model: str = Field(default="default", description="Model to use for embeddings")
+    input: Union[str, List[str]] = Field(..., description="Text(s) to embed - string or array of strings")
+    encoding_format: Optional[Literal["float", "base64"]] = Field(
+        default="float",
+        description="Format for embeddings (only 'float' supported currently)"
+    )
+    dimensions: Optional[int] = Field(
+        default=None,
+        description="Embedding dimensions (model-dependent, truncation not supported)"
+    )
+    user: Optional[str] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "model": "qwen3-0.6b",
+                "input": "The quick brown fox jumps over the lazy dog",
+                "encoding_format": "float"
+            }
+        }
+
+
+class EmbeddingData(BaseModel):
+    """Single embedding result"""
+    object: Literal["embedding"] = "embedding"
+    embedding: List[float] = Field(description="The embedding vector (normalized)")
+    index: int = Field(description="Index in the input array")
+
+
+class EmbeddingUsage(BaseModel):
+    """Token usage for embeddings"""
+    prompt_tokens: int
+    total_tokens: int
+
+
+class EmbeddingResponse(BaseModel):
+    """OpenAI-compatible embedding response"""
+    object: Literal["list"] = "list"
+    data: List[EmbeddingData]
+    model: str
+    usage: EmbeddingUsage
+
+
+# ============================================================================
+# OLLAMA EMBEDDING SCHEMAS
+# ============================================================================
+
+class OllamaEmbeddingRequest(BaseModel):
+    """Ollama-compatible embedding request"""
+    model: str = Field(..., description="Model name")
+    prompt: str = Field(..., description="Text to embed")
+    options: Optional[Dict[str, Any]] = Field(default=None, description="Model options")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "model": "qwen3-0.6b",
+                "prompt": "The quick brown fox"
+            }
+        }
+
+
+class OllamaEmbeddingResponse(BaseModel):
+    """Ollama-compatible embedding response"""
+    embedding: List[float] = Field(description="The embedding vector")
+    model: str
+    created_at: str = Field(description="ISO 8601 timestamp")
+    total_duration: Optional[int] = Field(default=None, description="Total time in nanoseconds")
+    load_duration: Optional[int] = Field(default=None, description="Model load time in nanoseconds")
+    prompt_eval_count: Optional[int] = Field(default=None, description="Number of tokens in prompt")

@@ -269,8 +269,8 @@ class RKLLMModel:
             rkllm_param = RKLLMParam()
             rkllm_param.model_path = self.model_path.encode('utf-8')
             
-            # Model defaults - from config
-            rkllm_param.max_context_len = model_defaults.get('max_context_len', max_context_len)
+            # Model defaults - RESPECT passed max_context_len over config (already validated by model_manager)
+            rkllm_param.max_context_len = max_context_len  # Use passed parameter (model-specific)
             rkllm_param.max_new_tokens = model_defaults.get('max_new_tokens', 4096)
             rkllm_param.skip_special_token = model_defaults.get('skip_special_token', True)
             rkllm_param.n_keep = model_defaults.get('n_keep', -1)
@@ -563,6 +563,164 @@ class RKLLMModel:
                 )
             )
             return result
+    
+    async def get_embeddings(
+        self,
+        text: str,
+        inference_config: dict
+    ) -> tuple[list[float], dict]:
+        """
+        Extract embeddings (hidden states) for the given text
+        
+        Uses RKLLM_INFER_GET_LAST_HIDDEN_LAYER mode to get the final
+        layer's hidden states, then normalizes them to unit vectors.
+        
+        Args:
+            text: Input text to embed
+            inference_config: Configuration dict (not heavily used for embeddings)
+            
+        Returns:
+            (embedding_vector, stats_dict) where:
+                - embedding_vector is a list of floats (normalized)
+                - stats_dict contains tokens_processed, time_ms, embedding_dim
+        """
+        if not self.handle:
+            raise RuntimeError("Model not loaded")
+        
+        import time
+        import math
+        
+        logger.info(f"🔍 Generating embeddings for text: {text[:100]}...")
+        start_time = time.time()
+        
+        # Storage for hidden states
+        hidden_states_result = {"data": None, "dim": 0, "num_tokens": 0}
+        
+        def embedding_callback(result_ptr, userdata, state):
+            """Callback for embedding extraction"""
+            if not result_ptr:
+                return 0
+            
+            result = result_ptr.contents
+            
+            if state == LLMCallState.RKLLM_RUN_FINISH:
+                logger.info("✅ Embedding extraction finished")
+                # Extract hidden states
+                if result.last_hidden_layer.hidden_states:
+                    embd_size = result.last_hidden_layer.embd_size
+                    num_tokens = result.last_hidden_layer.num_tokens
+                    
+                    logger.info(f"📊 Hidden layer: {num_tokens} tokens × {embd_size} dimensions")
+                    
+                    # Copy the last token's hidden state (common for embeddings)
+                    # Total size is num_tokens * embd_size
+                    # We want the last token: offset = (num_tokens - 1) * embd_size
+                    if num_tokens > 0:
+                        offset = (num_tokens - 1) * embd_size
+                        hidden_states_result["data"] = [
+                            result.last_hidden_layer.hidden_states[offset + i]
+                            for i in range(embd_size)
+                        ]
+                        hidden_states_result["dim"] = embd_size
+                        hidden_states_result["num_tokens"] = num_tokens
+                else:
+                    logger.warning("⚠️  No hidden states in result")
+            
+            elif state == LLMCallState.RKLLM_RUN_ERROR:
+                logger.error("❌ Error during embedding extraction")
+            
+            return 0
+        
+        # Register callback
+        callback_type = ctypes.CFUNCTYPE(
+            ctypes.c_int,
+            ctypes.POINTER(RKLLMResult),
+            ctypes.c_void_p,
+            ctypes.c_int
+        )
+        callback_c = callback_type(embedding_callback)
+        with self._callback_lock:
+            self._callback_storage[id(self)] = callback_c
+        
+        try:
+            # Set up input
+            rkllm_input = RKLLMInput()
+            rkllm_input.role = b"user"
+            rkllm_input.enable_thinking = False
+            rkllm_input.input_type = RKLLMInputType.RKLLM_INPUT_PROMPT
+            rkllm_input.input_data.prompt_input = text.encode('utf-8')
+            
+            # Set up inference parameters for embedding mode
+            infer_params = RKLLMInferParam()
+            infer_params.mode = RKLLMInferMode.RKLLM_INFER_GET_LAST_HIDDEN_LAYER
+            infer_params.lora_params = None
+            infer_params.prompt_cache_params = None
+            infer_params.keep_history = 0  # Don't keep history for embeddings
+            
+            # ALWAYS use sync mode for embeddings (async can cause crashes with embedding models)
+            is_async_mode = False
+            logger.debug("🔒 Using rkllm_run (sync) for embeddings")
+            rkllm_run = self.lib.rkllm_run
+            
+            rkllm_run.argtypes = [
+                RKLLM_Handle_t,
+                ctypes.POINTER(RKLLMInput),
+                ctypes.POINTER(RKLLMInferParam),
+                ctypes.c_void_p
+            ]
+            rkllm_run.restype = ctypes.c_int
+            
+            # Run the embedding extraction
+            logger.info("⏳ Running embedding extraction...")
+            ret = rkllm_run(
+                self.handle,
+                ctypes.byref(rkllm_input),
+                ctypes.byref(infer_params),
+                None
+            )
+            
+            if ret != 0:
+                raise RuntimeError(f"rkllm_run failed with code {ret}")
+            
+            # Wait for async completion if needed
+            if is_async_mode:
+                rkllm_is_running = self.lib.rkllm_is_running
+                rkllm_is_running.argtypes = [RKLLM_Handle_t]
+                rkllm_is_running.restype = ctypes.c_int
+                
+                logger.info("⏳ Waiting for async embedding extraction...")
+                time.sleep(0.01)  # Initial delay
+                poll_count = 0
+                while rkllm_is_running(self.handle) == 1:
+                    time.sleep(0.001)
+                    poll_count += 1
+                logger.info(f"✅ Embedding extraction complete (polled {poll_count} times)")
+            
+            # Check if we got hidden states
+            if hidden_states_result["data"] is None:
+                raise RuntimeError("Failed to extract hidden states")
+            
+            # Normalize to unit vector (L2 normalization)
+            embedding = hidden_states_result["data"]
+            norm = math.sqrt(sum(x * x for x in embedding))
+            if norm > 0:
+                embedding = [x / norm for x in embedding]
+            
+            elapsed_ms = (time.time() - start_time) * 1000
+            
+            stats = {
+                "tokens_processed": hidden_states_result["num_tokens"],
+                "time_ms": elapsed_ms,
+                "embedding_dim": hidden_states_result["dim"]
+            }
+            
+            logger.info(f"✅ Generated {len(embedding)}-dim embedding in {elapsed_ms:.1f}ms")
+            
+            return embedding, stats
+            
+        except Exception as e:
+            logger.error(f"Error generating embeddings: {e}")
+            raise
     
     def unload(self):
         """Unload model and free NPU resources
