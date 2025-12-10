@@ -153,11 +153,73 @@ class ModelManager:
             model_count += 1
             
             logger.info(
-                f"Discovered model: {friendly_name} "
+                f"Discovered local model: {friendly_name} "
                 f"({model_filename}, ctx={context_size})"
             )
         
-        logger.info(f"Discovered {model_count} models")
+        # Scan Hugging Face cache
+        self._discover_hf_models()
+        
+        logger.info(f"Total models discovered: {len(self._model_cache)}")
+
+    def _discover_hf_models(self):
+        """Scan Hugging Face cache for .rkllm files"""
+        try:
+            from huggingface_hub import scan_cache_dir
+            
+            # Check if HF_HOME exists
+            if not os.path.exists(settings.hf_home):
+                logger.debug(f"HF_HOME not found at {settings.hf_home}, skipping HF scan")
+                return
+
+            hf_cache = scan_cache_dir(settings.hf_home)
+            
+            for repo in hf_cache.repos:
+                # repo.repo_id looks like "google/gemma-2b"
+                repo_name = repo.repo_id.replace('/', '-')
+                
+                for revision in repo.revisions:
+                    # Check snapshot directory for .rkllm files
+                    snapshot_path = revision.snapshot_path
+                    if not os.path.exists(snapshot_path):
+                        continue
+                        
+                    for root, _, files in os.walk(snapshot_path):
+                        for file in files:
+                            if file.endswith('.rkllm'):
+                                full_path = os.path.join(root, file)
+                                filename = file
+                                
+                                # Create friendly name
+                                # Strategy: hf-{repo_name} if unique, else hf-{repo_name}-{filename}
+                                friendly_name = f"hf-{repo_name}"
+                                
+                                # If multiple models in repo, append filename stem
+                                # Or if name collision with existing model
+                                if friendly_name in self._model_cache:
+                                    stem = Path(filename).stem
+                                    friendly_name = f"{friendly_name}-{stem}"
+                                
+                                context_size = self._extract_context_size(filename)
+                                
+                                model_info = {
+                                    'id': friendly_name,
+                                    'filename': filename,
+                                    'folder': 'huggingface', # Virtual folder
+                                    'path': full_path,
+                                    'context_size': context_size,
+                                    'object': 'model',
+                                    'owned_by': 'huggingface',
+                                    'repo_id': repo.repo_id
+                                }
+                                
+                                self._model_cache[friendly_name] = model_info
+                                logger.info(f"Discovered HF model: {friendly_name} (ctx={context_size})")
+                                
+        except ImportError:
+            logger.warning("huggingface_hub not installed. Skipping HF model discovery.")
+        except Exception as e:
+            logger.error(f"Error scanning HF cache: {e}")
     
     def find_model_path(self, model_identifier: str) -> Optional[str]:
         """Find model path by friendly name, filename, or normalized name

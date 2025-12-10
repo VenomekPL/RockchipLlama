@@ -699,7 +699,8 @@ async def generate_cache(
     Body:
         {
             "cache_name": "system",  // Name for the binary cache
-            "prompt": "..."          // Prompt to cache
+            "prompt": "...",         // Prompt to cache (OPTIONAL)
+            "messages": [...]        // Chat messages to cache (OPTIONAL, used if prompt not provided)
         }
     
     This creates a .rkllm_cache file containing the NPU state after prefill.
@@ -720,12 +721,17 @@ async def generate_cache(
         body = await request.json()
         cache_name = body.get("cache_name")
         prompt = body.get("prompt")
+        messages = body.get("messages")
         
         if not cache_name:
             raise HTTPException(status_code=400, detail="cache_name is required")
         
+        # Handle messages -> prompt conversion
+        if not prompt and messages:
+            prompt = format_chat_prompt(messages)
+            
         if not prompt:
-            raise HTTPException(status_code=400, detail="prompt is required")
+            raise HTTPException(status_code=400, detail="Either 'prompt' or 'messages' is required")
         
         # Validate cache name
         if not cache_name.replace("-", "").replace("_", "").isalnum():

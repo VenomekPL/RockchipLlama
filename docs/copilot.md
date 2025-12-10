@@ -78,8 +78,7 @@ RockchipLlama/
 │   ├── QUICKSTART.md           # Getting started guide
 │   ├── MODEL_MANAGEMENT.md     # Model management guide
 │   ├── BENCHMARKING.md         # Benchmarking guide
-│   ├── BENCHMARK_QUICKREF.md   # Benchmark quick reference
-│   └── benchmark_prompts.json  # Test prompts library
+│   └── BENCHMARK_QUICKREF.md   # Benchmark quick reference
 ├── external/           # External dependencies
 │   └── rknn-llm/       # Rockchip RKNN-LLM submodule
 │       ├── examples/
@@ -105,7 +104,8 @@ RockchipLlama/
 │   │   ├── model_manager.py    # Singleton model manager
 │   │   └── rkllm_model.py      # RKLLM runtime wrapper
 │   └── config/
-│       └── settings.py         # Configuration management
+│       ├── settings.py         # Configuration management
+│       └── benchmark_prompts.json # Test prompts library
 ├── scripts/            # Test and benchmark scripts
 │   ├── benchmark.py            # Comprehensive benchmark suite
 │   ├── test_benchmark.py       # Quick benchmark test
@@ -372,6 +372,44 @@ RockchipLlama/
 
 **Decision**: Skip embeddings until model compatibility verified. All code preserved for future use.
 
+#### 4.7: RKLLM v1.2.3 Upgrade & Chat Templates 💬 (COMPLETED ✅ - December 10, 2025)
+- [x] Upgrade `external/rknn-llm` to v1.2.3
+  - [x] Verified new features: Qwen3-VL, DeepSeek-OCR, Auto-Cache
+- [x] Chat Template Implementation
+  - [x] Bind `rkllm_set_chat_template` in `rkllm_model.py`
+  - [x] Add `chat_template` section to `inference_config.json`
+  - [x] Auto-apply templates on model load
+- [x] Automatic Cache Reuse Analysis
+  - [x] Investigated v1.2.3 "Automatic Cache Reuse"
+  - [x] Finding: Applies to `RKLLM_INPUT_EMBED` only
+  - [x] Decision: Continue using manual binary cache for text generation
+- **Status**: Project fully updated to latest runtime with enhanced configuration
+
+#### 4.8: Comprehensive Testing & Validation 🧪 (IN PROGRESS - December 10, 2025)
+- [x] Design Test Plan
+  - [x] Created `docs/tests.md` with scenarios for RK3588
+  - [x] Defined success criteria for all major features
+- [x] Execute Test Suite
+  - [x] Created automated script `scripts/tests.sh`
+  - [x] **Smoke Test**: Verified basic inference (Passed)
+  - [x] **Chat Templates**: Verified "Pirate Mode" (Passed - Model adopted persona)
+  - [x] **Ollama**: Verified `/api/generate` and `/api/chat` (Passed)
+  - [ ] **Concurrency**: Run `test_batch_concurrent.py`
+  - [ ] **Caching**: Verify TTFT reduction with `test_benchmark.py`
+- [ ] Stability Verification
+  - [ ] Run load/unload loop test
+  - [ ] Monitor memory usage during extended runs
+
+#### 4.9: Hugging Face Integration & Default Model Fix 🛠️ (COMPLETED ✅ - December 10, 2025)
+- [x] Fix Default Model
+  - [x] Updated `config/settings.py` to point to `qwen3-0.6b` (existing model)
+- [x] Hugging Face Integration
+  - [x] Added `huggingface_hub` dependency
+  - [x] Implemented `_discover_hf_models` in `ModelManager`
+  - [x] Scans `HF_HOME` (default: `~/.cache/huggingface/hub`) for `.rkllm` files
+  - [x] Auto-registers discovered models with `hf-` prefix (or friendly name)
+  - [x] Enables Docker volume mounting of HF cache for shared model storage
+
 **Phase 4 Success Criteria:**
 - ✅ **Phase 4.1 COMPLETE**: Binary prompt caching (23.5x speedup achieved!)
   - ✅ Binary cache creation with NPU state saving
@@ -379,6 +417,8 @@ RockchipLlama/
   - ✅ 95.8% TTFT reduction validated
 - ✅ **Phase 4.2 COMPLETE**: Queue-based concurrency (stable parallel requests)
 - ✅ **Phase 4.5 COMPLETE**: Ollama API compatibility (universal server)
+- ✅ **Phase 4.7 COMPLETE**: RKLLM v1.2.3 & Chat Templates
+- 🔄 **Phase 4.8 IN PROGRESS**: Comprehensive Testing & Validation
 - ⏸️ **Phase 4.6 POSTPONED**: Embeddings API (model incompatibility, code preserved)
 - [ ] **Phase 4.3**: LongRoPE support (32K-64K context) - requires model rebuild
 - [ ] **Phase 4.4**: Hugging Face integration (auto-download & convert)
@@ -491,7 +531,7 @@ Client Request → API Gateway → Compatibility Layer → Model Management → 
 - **Repository**: [airockchip/rknn-llm](https://github.com/airockchip/rknn-llm.git)
 - **Integration Method**: Git submodule at `/external/rknn-llm/`
 - **Date Integrated**: October 19, 2025
-- **Version**: v1.2.1 / v1.2.2
+- **Version**: v1.2.3
 - **Components Available**:
   - `rkllm-runtime/` - RKNN LLM runtime libraries (`librkllmrt.so`)
     - Linux/Android support
@@ -514,6 +554,8 @@ Client Request → API Gateway → Compatibility Layer → Model Management → 
   - Optimized KV cache management (v1.2.1)
   - Cross-attention inference (v1.2.1)
   - Performance statistics tracking (v1.2.1)
+  - Automatic Cache Reuse for Embeddings (v1.2.3)
+  - External Chat Template Support (v1.2.3)
 
 ### Required External Repository
 - **Rockchip RKNN Toolkit**: Drivers, runtime, and examples
@@ -684,6 +726,10 @@ Client Request → API Gateway → Compatibility Layer → Model Management → 
    - **Gemma-3-270M**: Ultra-fast testing model, 16K context
    - **Gemma-3-1B-it**: Instruction-tuned, general testing
    - **Date Acquired**: October 19, 2025
+
+4. **Cache Strategy**: ✅ **Manual Binary Cache** (Selected)
+   - **Rationale**: RKLLM v1.2.3 "Automatic Cache Reuse" only applies to embedding inputs. For text generation, manual binary caching (saving/loading NPU state) remains the most effective way to reduce TTFT.
+   - **Date Decided**: December 10, 2025
 
 ### Technology Decisions (Pending)
 2. **Container Base Image**: Specific ARM64 image selection
@@ -950,7 +996,7 @@ Binary cache generation using RKLLM's native `RKLLMPromptCacheParam` to achieve 
 #### Benchmarking System Implementation (Completed)
 - ✅ Created comprehensive benchmark suite (`benchmark.py`)
 - ✅ Created quick benchmark test (`test_benchmark.py`)
-- ✅ Added benchmark prompts library (`docs/benchmark_prompts.json`)
+- ✅ Added benchmark prompts library (`config/benchmark_prompts.json`)
 - ✅ Created benchmarking guide (`docs/BENCHMARKING.md`)
 - ✅ Created quick reference (`docs/BENCHMARK_QUICKREF.md`)
 - ✅ Updated README.md with benchmark information

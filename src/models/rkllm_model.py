@@ -185,6 +185,7 @@ class RKLLMModel:
         self.generated_text = []
         self.generation_state = None
         self.perf_stats = None  # Will be populated by callback
+        self.current_max_tokens = -1  # No limit by default
         
         # Cache management
         self.cache_manager = PromptCacheManager()
@@ -203,6 +204,11 @@ class RKLLMModel:
     def _callback_impl(self, result, userdata, state):
         """Internal callback for RKLLM - called from C library"""
         try:
+            # Check token limit
+            if self.current_max_tokens > 0 and len(self.generated_text) >= self.current_max_tokens:
+                logger.info(f"🛑 Max tokens reached ({self.current_max_tokens}), stopping generation")
+                return 1  # Stop generation
+
             logger.info(f"🔔 Callback called: state={state}")
             if state == LLMCallState.RKLLM_RUN_FINISH:
                 self.generation_state = state
@@ -348,6 +354,30 @@ class RKLLMModel:
             
             logger.info(f"✅ REAL RKLLM model loaded successfully on NPU!")
             
+            # Initialize chat template function
+            try:
+                self.rkllm_set_chat_template = self.lib.rkllm_set_chat_template
+                self.rkllm_set_chat_template.argtypes = [
+                    RKLLM_Handle_t, 
+                    ctypes.c_char_p, 
+                    ctypes.c_char_p, 
+                    ctypes.c_char_p
+                ]
+                self.rkllm_set_chat_template.restype = ctypes.c_int
+                
+                # Apply chat template from config if available
+                chat_tmpl = inference_config.get('chat_template', {})
+                if chat_tmpl:
+                    self.set_chat_template(
+                        system_prompt=chat_tmpl.get('system_prompt', ''),
+                        prefix=chat_tmpl.get('user_prefix', ''),
+                        postfix=chat_tmpl.get('assistant_prefix', '')
+                    )
+            except AttributeError:
+                logger.warning("⚠️  rkllm_set_chat_template not found in library (older version?)")
+            except Exception as e:
+                logger.error(f"Error setting up chat template: {e}")
+            
             # Set model name from path (extract folder name)
             self.model_name = Path(self.model_path).parent.name
             logger.info(f"Model name set to: {self.model_name}")
@@ -373,6 +403,42 @@ class RKLLMModel:
         logger.info(f"System cache auto-generation disabled. Create caches via POST /v1/cache/{self.model_name}")
         return
     
+    def set_chat_template(self, system_prompt: str, prefix: str, postfix: str):
+        """
+        Set the chat template for the LLM.
+        
+        Args:
+            system_prompt: System prompt content
+            prefix: User prompt prefix (e.g. "<|user|>\n")
+            postfix: User prompt postfix (e.g. "<|assistant|>\n")
+        """
+        if not self.handle:
+            raise RuntimeError("Model not loaded. Call load() first.")
+            
+        try:
+            if not hasattr(self, 'rkllm_set_chat_template'):
+                logger.warning("rkllm_set_chat_template not available")
+                return
+
+            logger.info(f"Setting chat template: system_len={len(system_prompt)}")
+            
+            ret = self.rkllm_set_chat_template(
+                self.handle,
+                system_prompt.encode('utf-8'),
+                prefix.encode('utf-8'),
+                postfix.encode('utf-8')
+            )
+            
+            if ret != 0:
+                logger.error(f"rkllm_set_chat_template failed with code: {ret}")
+                raise RuntimeError(f"Failed to set chat template: {ret}")
+                
+            logger.info("✅ Chat template set successfully")
+            
+        except Exception as e:
+            logger.error(f"Error setting chat template: {e}")
+            raise
+
     def generate(
         self,
         prompt: str,
@@ -417,13 +483,17 @@ class RKLLMModel:
             self.generated_text = []
             self.generation_state = None
             self.current_callback = callback
+            self.current_max_tokens = max_new_tokens
             
             # Create input
             rkllm_input = RKLLMInput()
             rkllm_input.role = b"user"
             rkllm_input.enable_thinking = False
             rkllm_input.input_type = RKLLMInputType.RKLLM_INPUT_PROMPT
-            rkllm_input.input_data.prompt_input = prompt.encode('utf-8')
+            
+            # Keep reference to bytes to prevent GC
+            self._current_prompt_bytes = prompt.encode('utf-8')
+            rkllm_input.input_data.prompt_input = self._current_prompt_bytes
             
             # Create infer params
             infer_params = RKLLMInferParam()
@@ -433,10 +503,14 @@ class RKLLMModel:
             
             # Setup binary prompt cache if provided
             prompt_cache = None
+            self._current_cache_path_bytes = None # Keep ref
+            
             if binary_cache_path:
                 prompt_cache = RKLLMPromptCacheParam()
                 prompt_cache.save_prompt_cache = 1 if save_binary_cache else 0
-                prompt_cache.prompt_cache_path = binary_cache_path.encode('utf-8')
+                self._current_cache_path_bytes = binary_cache_path.encode('utf-8')
+                prompt_cache.prompt_cache_path = self._current_cache_path_bytes
+                
                 infer_params.prompt_cache_params = ctypes.cast(
                     ctypes.pointer(prompt_cache),
                     ctypes.c_void_p

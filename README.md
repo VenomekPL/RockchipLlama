@@ -58,6 +58,8 @@ Binary caching reduces Time To First Token by **95.8%** for repeated prompts!
 
 **✅ Phase 4.1 Complete** - Binary Prompt Caching (23.5x speedup achieved)  
 **✅ Phase 4.2 Complete** - Config-based parameters + RKLLM v1.2.2 upgrade  
+**✅ Phase 4.5 Complete** - Ollama API compatibility
+**✅ Phase 4.7 Complete** - RKLLM v1.2.3 Upgrade & Chat Templates
 **✅ Queue-Based Concurrency** - Stable concurrent request handling
 
 **Next Steps:**
@@ -215,6 +217,14 @@ Runtime configuration without server restart!
     "temperature": 0.6,
     "repeat_penalty": 0.9
   },
+  "chat_template": {
+    "system_start": "<|im_start|>system\n",
+    "system_end": "<|im_end|>\n",
+    "user_start": "<|im_start|>user\n",
+    "user_end": "<|im_end|>\n",
+    "assistant_start": "<|im_start|>assistant\n",
+    "assistant_end": "<|im_end|>\n"
+  },
   "hardware": {
     "num_npu_cores": 3,
     "enabled_cpus_mask": 240,  // 0xF0 = big cores 4-7
@@ -243,7 +253,7 @@ RKLLM_LIB_PATH=/usr/lib/librkllmrt.so
 **Tested On:**
 - Orange Pi 5 Max (RK3588)
 - NPU @ 1.0 GHz, CPU @ 2.3 GHz
-- RKLLM 1.2.1
+- RKLLM 1.2.3
 
 ---
 

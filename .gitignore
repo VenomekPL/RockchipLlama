@@ -218,3 +218,6 @@ cache/*/*.bin
 cache/*/*.json
 cache/*/*.rkllm_cache
 *.rkllm_cache
+
+# Benchmark results
+benchmarks/

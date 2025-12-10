@@ -27,6 +27,11 @@
     "enabled_cpus_num": 4,
     "enabled_cpus_mask": 240
   },
+  "chat_template": {
+    "system_prompt": "You are a helpful assistant.",
+    "user_prefix": "<|im_start|>user\n",
+    "assistant_prefix": "<|im_end|>\n<|im_start|>assistant\n"
+  },
   "notes": {
     "model_defaults": {
       "max_context_len": "Maximum context window size (tokens)",

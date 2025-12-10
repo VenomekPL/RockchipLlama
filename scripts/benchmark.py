@@ -105,7 +105,7 @@ class BenchmarkRunner:
         self.timeout = timeout
         self.results: List[PerformanceMetrics] = []
         
-    def load_prompts(self, prompts_file: str = "docs/benchmark_prompts.json") -> Dict[str, Any]:
+    def load_prompts(self, prompts_file: str = "config/benchmark_prompts.json") -> Dict[str, Any]:
         """Load benchmark prompts from JSON file"""
         try:
             with open(prompts_file, 'r', encoding='utf-8') as f:
@@ -504,8 +504,8 @@ Examples:
                        help='Number of times to run each test (default: 1)')
     parser.add_argument('--model', type=str, default=None,
                        help='Model to load before benchmarking (optional, uses currently loaded model if not specified)')
-    parser.add_argument('--output', type=str, default='benchmark_results.json',
-                       help='Output file for detailed results (default: benchmark_results.json)')
+    parser.add_argument('--output', type=str, default='benchmarks/benchmark_results.json',
+                       help='Output file for detailed results (default: benchmarks/benchmark_results.json)')
     parser.add_argument('--max-tokens', type=int, default=512,
                        help='Maximum tokens to generate per request (default: 512)')
     parser.add_argument('--timeout', type=int, default=300,

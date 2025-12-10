@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     
     # Model settings
     models_dir: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
-    default_model: str = "google_gemma-3-270m-w8a8-opt0-hybrid0-npu3-ctx16384-rk3588.rkllm"
+    default_model: str = "qwen3-0.6b"
+    hf_home: str = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
     
     # RKLLM Runtime settings
     rkllm_lib_path: str = "/usr/lib/librkllmrt.so"  # System library path

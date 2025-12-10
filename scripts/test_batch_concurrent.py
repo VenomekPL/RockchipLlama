@@ -178,7 +178,7 @@ class ConcurrentBatchTester:
         """Run all 10 test prompts concurrently"""
         
         # Load test prompts
-        prompts_file = "/home/angeiv/AI/RockchipLlama/docs/benchmark_prompts.json"
+        prompts_file = "/home/angeiv/AI/RockchipLlama/config/benchmark_prompts.json"
         with open(prompts_file, 'r') as f:
             prompts_data = json.load(f)
         
