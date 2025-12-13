@@ -186,11 +186,15 @@ class RKLLMModel:
         self.generation_state = None
         self.perf_stats = None  # Will be populated by callback
         self.current_max_tokens = -1  # No limit by default
+        self.current_stop_sequences = [] # Stop sequences
         
         # Cache management
         self.cache_manager = PromptCacheManager()
         self.system_prompt_generator = SystemPromptGenerator()
         self.model_name = None  # Set in load() method
+        
+        # Initialize state tracking for smart caching
+        self.npu_context = ""
         
         # Validate paths
         if not os.path.exists(model_path):
@@ -209,7 +213,23 @@ class RKLLMModel:
                 logger.info(f"🛑 Max tokens reached ({self.current_max_tokens}), stopping generation")
                 return 1  # Stop generation
 
-            logger.info(f"🔔 Callback called: state={state}")
+            # Check stop sequences
+            if self.current_stop_sequences:
+                # We only need to check the last few tokens + new token to be efficient
+                # But for simplicity, let's check the tail of the generated text
+                # Construct the tail text (enough to cover the longest stop sequence)
+                # Assuming max stop sequence is not huge (e.g. < 100 chars)
+                tail_len = 200 
+                current_tail = "".join(self.generated_text[-tail_len:])
+                
+                for stop_seq in self.current_stop_sequences:
+                    if stop_seq in current_tail:
+                        logger.info(f"🛑 Stop sequence '{stop_seq}' found, stopping generation")
+                        # return 1 # DISABLED to debug crash
+                        pass
+
+
+            # logger.info(f"🔔 Callback called: state={state}")
             if state == LLMCallState.RKLLM_RUN_FINISH:
                 self.generation_state = state
                 # Extract final performance stats
@@ -229,13 +249,13 @@ class RKLLMModel:
                 logger.error("❌ Generation error in callback")
             elif state == LLMCallState.RKLLM_RUN_NORMAL:
                 self.generation_state = state
-                logger.info(f"📝 RKLLM_RUN_NORMAL: result={result}, contents={result.contents if result else 'None'}")
+                # logger.info(f"📝 RKLLM_RUN_NORMAL: result={result}, contents={result.contents if result else 'None'}")
                 if result and result.contents:
                     text_ptr = result.contents.text
-                    logger.info(f"📝 text_ptr={text_ptr}, type={type(text_ptr)}")
+                    # logger.info(f"📝 text_ptr={text_ptr}, type={type(text_ptr)}")
                     if text_ptr is not None:
                         text = text_ptr.decode('utf-8') if isinstance(text_ptr, bytes) else str(text_ptr)
-                        logger.info(f"📝 Got text token: {repr(text)} (len={len(text)})")
+                        # logger.info(f"📝 Got text token: {repr(text)} (len={len(text)})")
                         if text:  # Only append if non-empty
                             self.generated_text.append(text)
                             # Call user callback if set
@@ -292,6 +312,12 @@ class RKLLMModel:
             logger.info(f"  🎲 temperature={rkllm_param.temperature}, top_p={rkllm_param.top_p}, top_k={rkllm_param.top_k}")
             rkllm_param.frequency_penalty = inf_params.get('frequency_penalty', 0.0)
             rkllm_param.presence_penalty = inf_params.get('presence_penalty', 0.0)
+            
+            # Log ignored parameters
+            if 'min_p' in inf_params:
+                logger.warning(f"⚠️  min_p={inf_params['min_p']} found in config but NOT supported by RKLLM runtime (ignored)")
+            if 'seed' in inf_params:
+                logger.warning(f"⚠️  seed={inf_params['seed']} found in config but NOT supported by RKLLM runtime (ignored)")
             
             # Mirostat - from config
             rkllm_param.mirostat = inf_params.get('mirostat', 0)
@@ -364,15 +390,36 @@ class RKLLMModel:
                     ctypes.c_char_p
                 ]
                 self.rkllm_set_chat_template.restype = ctypes.c_int
+            except AttributeError:
+                logger.warning("⚠️  rkllm_set_chat_template not found in library (older version?)")
+
+            # Initialize KV cache clear function
+            try:
+                self.rkllm_clear_kv_cache = self.lib.rkllm_clear_kv_cache
+                self.rkllm_clear_kv_cache.argtypes = [
+                    RKLLM_Handle_t,
+                    ctypes.c_int,
+                    ctypes.POINTER(ctypes.c_int),
+                    ctypes.POINTER(ctypes.c_int)
+                ]
+                self.rkllm_clear_kv_cache.restype = ctypes.c_int
+                logger.info("✅ rkllm_clear_kv_cache bound successfully")
+            except AttributeError:
+                logger.warning("⚠️  rkllm_clear_kv_cache not found in library")
+                self.rkllm_clear_kv_cache = None
+
+            # DISABLED: We handle chat templating manually in openai_routes.py
+                # Calling this disables internal parsing but might also interfere with our manual formatting
+                # if not careful. Since we send the full formatted string as a single "prompt",
+                # we don't want RKLLM to wrap it again.
                 
-                # Apply chat template from config if available
-                chat_tmpl = inference_config.get('chat_template', {})
-                if chat_tmpl:
-                    self.set_chat_template(
-                        system_prompt=chat_tmpl.get('system_prompt', ''),
-                        prefix=chat_tmpl.get('user_prefix', ''),
-                        postfix=chat_tmpl.get('assistant_prefix', '')
-                    )
+                # chat_tmpl = inference_config.get('chat_template', {})
+                # if chat_tmpl:
+                #     self.set_chat_template(
+                #         system_prompt=chat_tmpl.get('system_prompt', ''),
+                #         prefix=chat_tmpl.get('user_prefix', ''),
+                #         postfix=chat_tmpl.get('assistant_prefix', '')
+                #     )
             except AttributeError:
                 logger.warning("⚠️  rkllm_set_chat_template not found in library (older version?)")
             except Exception as e:
@@ -449,7 +496,8 @@ class RKLLMModel:
         repeat_penalty: float = 1.1,
         callback: Optional[Callable[[str], None]] = None,
         binary_cache_path: Optional[str] = None,
-        save_binary_cache: bool = False
+        save_binary_cache: bool = False,
+        stop: Optional[List[str]] = None
     ) -> tuple[str, Optional[dict]]:
         """
         Generate text completion using REAL NPU
@@ -464,6 +512,7 @@ class RKLLMModel:
             callback: Optional streaming callback function
             binary_cache_path: Path to binary cache file (.rkllm_cache)
             save_binary_cache: If True, save NPU state to binary_cache_path after prefill
+            stop: Optional list of stop sequences
             
         Returns:
             (Generated text, performance stats dict)
@@ -475,6 +524,32 @@ class RKLLMModel:
             logger.info(f"Running REAL NPU inference...")
             logger.debug(f"Prompt length: {len(prompt)} chars")
             
+            # Smart Caching Logic
+            # Check if the new prompt is a continuation of the current NPU context
+            should_clear = True
+            input_prompt = prompt
+            
+            if self.npu_context and prompt.startswith(self.npu_context):
+                # Optimization: Only send the new part (delta)
+                delta = prompt[len(self.npu_context):]
+                if delta:
+                    logger.info(f"♻️ Smart Cache Hit: Sending delta ({len(delta)} chars)")
+                    input_prompt = delta
+                    should_clear = False
+                else:
+                    # Exact match? Weird but possible. Send empty or just clear to be safe.
+                    logger.warning("⚠️ Smart Cache: Exact match with context, clearing to be safe")
+            
+            if should_clear:
+                # Context switch or first run
+                if hasattr(self, 'rkllm_clear_kv_cache') and self.rkllm_clear_kv_cache:
+                    ret = self.rkllm_clear_kv_cache(self.handle, 0, None, None)
+                    if ret == 0:
+                        logger.debug("🧹 Smart Cache: Context switch, KV cache cleared")
+                        self.npu_context = ""
+                    else:
+                        logger.warning(f"⚠️  Failed to clear KV cache: {ret}")
+            
             if binary_cache_path:
                 action = "Saving to" if save_binary_cache else "Loading from"
                 logger.info(f"🔥 Binary cache: {action} {binary_cache_path}")
@@ -485,14 +560,24 @@ class RKLLMModel:
             self.current_callback = callback
             self.current_max_tokens = max_new_tokens
             
+            # Set stop sequences (default to common ones if not provided)
+            self.current_stop_sequences = stop if stop else ["<|im_end|>", "<|endoftext|>"]
+            
             # Create input
             rkllm_input = RKLLMInput()
             rkllm_input.role = b"user"
-            rkllm_input.enable_thinking = False
+            
+            # Enable thinking from config
+            from config.settings import inference_config
+            enable_thinking = inference_config['model_defaults'].get('enable_thinking', False)
+            rkllm_input.enable_thinking = enable_thinking
+            if enable_thinking:
+                logger.info("🧠 Thinking mode ENABLED")
+            
             rkllm_input.input_type = RKLLMInputType.RKLLM_INPUT_PROMPT
             
             # Keep reference to bytes to prevent GC
-            self._current_prompt_bytes = prompt.encode('utf-8')
+            self._current_prompt_bytes = input_prompt.encode('utf-8')
             rkllm_input.input_data.prompt_input = self._current_prompt_bytes
             
             # Create infer params
@@ -579,6 +664,10 @@ class RKLLMModel:
             result = ''.join(self.generated_text)
             logger.info(f"Generated {len(result)} characters: {repr(result[:100])}")
             
+            # Update NPU context for next run
+            # The new context is the full prompt + what was just generated
+            self.npu_context = prompt + result
+            
             # Return tuple: (text, perf_stats)
             return result, self.perf_stats
             
@@ -596,7 +685,8 @@ class RKLLMModel:
         repeat_penalty: float = 1.1,
         callback: Optional[Callable[[str], None]] = None,
         binary_cache_path: Optional[str] = None,
-        save_binary_cache: bool = False
+        save_binary_cache: bool = False,
+        stop: Optional[List[str]] = None
     ) -> tuple[str, Optional[dict]]:
         """
         Async wrapper for generate() with batch slot queueing
@@ -633,7 +723,8 @@ class RKLLMModel:
                     repeat_penalty=repeat_penalty,
                     callback=callback,
                     binary_cache_path=binary_cache_path,
-                    save_binary_cache=save_binary_cache
+                    save_binary_cache=save_binary_cache,
+                    stop=stop
                 )
             )
             return result

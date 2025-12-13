@@ -51,8 +51,15 @@ class PerformanceMetrics:
         """Calculate derived metrics"""
         self.total_tokens = self.input_tokens + self.output_tokens
         
-        if self.generate_time_ms > 0 and self.output_tokens > 0:
-            self.tokens_per_second = (self.output_tokens / self.generate_time_ms) * 1000
+        # Calculate generation speed based on generation time (excluding prefill)
+        # If generate_time_ms is available (from RKLLM), use it.
+        # Otherwise, use total_time - ttft.
+        gen_time = self.generate_time_ms
+        if gen_time <= 0 and self.total_time_ms > 0:
+             gen_time = self.total_time_ms - self.ttft_ms
+             
+        if gen_time > 0 and self.output_tokens > 0:
+            self.tokens_per_second = (self.output_tokens / gen_time) * 1000
         
         if self.prefill_time_ms > 0 and self.input_tokens > 0:
             self.input_tokens_per_second = (self.input_tokens / self.prefill_time_ms) * 1000
@@ -100,7 +107,7 @@ class BenchmarkSummary:
 class BenchmarkRunner:
     """Runs benchmark tests against the RockchipLlama API"""
     
-    def __init__(self, base_url: str = "http://localhost:8080", timeout: int = 300):
+    def __init__(self, base_url: str = "http://localhost:8021", timeout: int = 300):
         self.base_url = base_url
         self.timeout = timeout
         self.results: List[PerformanceMetrics] = []
@@ -141,7 +148,7 @@ class BenchmarkRunner:
                     "max_context_len": max_context_len,
                     "num_npu_core": num_npu_core
                 },
-                timeout=30
+                timeout=self.timeout
             )
             if response.status_code == 200:
                 data = response.json()
@@ -157,7 +164,7 @@ class BenchmarkRunner:
             return False
     
     def run_single_inference(self, prompt: str, prompt_id: str, prompt_name: str, 
-                            temperature: float = 0.7, max_tokens: int = 512) -> PerformanceMetrics:
+                            temperature: float = 0.7, max_tokens: int = 2048) -> PerformanceMetrics:
         """Run a single inference and collect metrics"""
         
         metrics = PerformanceMetrics(
@@ -231,7 +238,7 @@ class BenchmarkRunner:
                                 # Extract RKLLM perf stats if available
                                 if 'prefill_time_ms' in usage:
                                     metrics.prefill_time_ms = usage['prefill_time_ms']
-                                    metrics.ttft_ms = usage['prefill_time_ms']  # TTFT = prefill time
+                                    # metrics.ttft_ms = usage['prefill_time_ms']  # Prefer measured TTFT
                                 if 'generate_time_ms' in usage:
                                     metrics.generate_time_ms = usage['generate_time_ms']
                                 if 'prefill_tokens' in usage:
@@ -243,7 +250,8 @@ class BenchmarkRunner:
                             
                             chunk_count += 1
                             
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError as e:
+                            print(f"⚠️ JSON decode error: {e} | Line: {line[:100]}...")
                             continue
             
             # End timer
@@ -255,6 +263,7 @@ class BenchmarkRunner:
                 metrics.ttft_ms = metrics.total_time_ms
             
             # Calculate generation time only if not provided by RKLLM perf stats
+            # IMPORTANT: If RKLLM stats are missing, we fallback to client-side measurement
             if metrics.generate_time_ms == 0:
                 metrics.generate_time_ms = metrics.total_time_ms - metrics.ttft_ms
             
@@ -265,6 +274,8 @@ class BenchmarkRunner:
             if metrics.input_tokens == 0:
                 metrics.input_tokens = len(prompt) // 4
             if metrics.output_tokens == 0:
+                # If we have response text, use a better approximation or count chunks if they were single tokens
+                # For now, fallback to char length / 4 if no usage stats
                 metrics.output_tokens = len(metrics.response_text) // 4
             
             # Recalculate derived metrics
@@ -316,11 +327,12 @@ class BenchmarkRunner:
                 test_id = test.get('id', f'test_{test_num}')
                 test_name = test.get('name', 'Unnamed Test')
                 prompt = test.get('prompt', '')
+                max_tokens = test.get('max_tokens', 2048)
                 
                 print(f"[{test_num}/{total_tests}] Testing: {test_name} (ID: {test_id})")
                 print(f"   Prompt length: {len(prompt)} chars")
                 
-                metrics = self.run_single_inference(prompt, test_id, test_name)
+                metrics = self.run_single_inference(prompt, test_id, test_name, max_tokens=max_tokens)
                 results.append(metrics)
                 
                 if metrics.success:
@@ -472,6 +484,76 @@ class BenchmarkRunner:
         
         print(f"💾 Detailed results saved to: {output_file}")
 
+    def save_markdown_report(self, results: List[PerformanceMetrics], summary: BenchmarkSummary, 
+                           output_file: str = None):
+        """Save results to a Markdown report"""
+        if output_file is None:
+            # Default to replacing .json with .md, or appending .md
+            if summary.model_name:
+                output_file = f"benchmarks/benchmark_report_{summary.model_name}.md"
+            else:
+                output_file = "benchmarks/benchmark_report.md"
+            
+        with open(output_file, 'w', encoding='utf-8') as f:
+            # Header
+            f.write(f"# 📊 Benchmark Report: {summary.model_name}\n\n")
+            f.write(f"**Date:** {summary.timestamp}\n")
+            f.write(f"**Duration:** {summary.duration_seconds:.2f} seconds\n\n")
+            
+            # Summary Section
+            f.write("## 📈 Performance Summary\n\n")
+            f.write("| Metric | Value |\n")
+            f.write("| :--- | :--- |\n")
+            f.write(f"| **Total Requests** | {summary.total_requests} |\n")
+            f.write(f"| **Successful** | {summary.successful_requests} ✅ |\n")
+            f.write(f"| **Failed** | {summary.failed_requests} ❌ |\n")
+            f.write(f"| **Avg Generation Speed** | **{summary.avg_tokens_per_second:.2f} tokens/sec** |\n")
+            f.write(f"| **Avg TTFT** | {summary.avg_ttft_ms:.2f} ms |\n")
+            f.write(f"| **Avg Total Time** | {summary.avg_total_time_ms:.2f} ms |\n")
+            f.write(f"| **Total Output Tokens** | {summary.total_output_tokens:,} |\n")
+            f.write(f"| **Avg Memory Usage** | {summary.avg_memory_mb:.2f} MB |\n\n")
+            
+            # Detailed Results
+            f.write("## 📝 Detailed Results\n\n")
+            
+            for i, res in enumerate(results, 1):
+                icon = "✅" if res.success else "❌"
+                f.write(f"### {i}. {res.prompt_name} ({res.prompt_id}) {icon}\n\n")
+                
+                # Metrics Table
+                f.write("| Metric | Value |\n")
+                f.write("| :--- | :--- |\n")
+                f.write(f"| **Status** | {'Success' if res.success else 'Failed'} |\n")
+                f.write(f"| **TTFT** | {res.ttft_ms:.2f} ms |\n")
+                f.write(f"| **Total Time** | {res.total_time_ms:.2f} ms |\n")
+                f.write(f"| **Speed** | {res.tokens_per_second:.2f} t/s |\n")
+                f.write(f"| **Input/Output** | {res.input_tokens} / {res.output_tokens} tokens |\n\n")
+                
+                if not res.success:
+                    f.write(f"**Error:** `{res.error_message}`\n\n")
+                    continue
+                
+                # Prompt
+                f.write("#### 📥 Prompt\n")
+                f.write("```text\n")
+                f.write(res.prompt_text.strip())
+                f.write("\n```\n\n")
+                
+                # Response
+                f.write("#### 📤 Response\n")
+                
+                # Process thinking tags for collapsible view
+                response_text = res.response_text.strip()
+                if "<think>" in response_text and "</think>" in response_text:
+                    response_text = response_text.replace("<think>", "<details><summary>Thinking Process</summary>\n\n")
+                    response_text = response_text.replace("</think>", "\n</details>\n\n")
+                
+                f.write(f"{response_text}\n\n")
+                
+                f.write("---\n\n")
+                
+        print(f"📄 Markdown report saved to: {output_file}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -496,22 +578,30 @@ Examples:
         """
     )
     
-    parser.add_argument('--url', default='http://localhost:8080',
-                       help='Base URL of the API server (default: http://localhost:8080)')
-    parser.add_argument('--type', choices=['performance', 'quality', 'all'], default='performance',
-                       help='Type of benchmark to run (default: performance)')
+    # Generate timestamped default filename
+    timestamp = int(time.time())
+    default_output = f'benchmarks/benchmark_results_{timestamp}.json'
+
+    parser.add_argument('--url', default='http://localhost:8021',
+                       help='Base URL of the API server (default: http://localhost:8021)')
+    parser.add_argument('--type', choices=['performance', 'quality', 'all'], default='all',
+                       help='Type of benchmark to run (default: all)')
     parser.add_argument('--runs', type=int, default=1,
                        help='Number of times to run each test (default: 1)')
     parser.add_argument('--model', type=str, default=None,
                        help='Model to load before benchmarking (optional, uses currently loaded model if not specified)')
-    parser.add_argument('--output', type=str, default='benchmarks/benchmark_results.json',
-                       help='Output file for detailed results (default: benchmarks/benchmark_results.json)')
-    parser.add_argument('--max-tokens', type=int, default=512,
-                       help='Maximum tokens to generate per request (default: 512)')
+    parser.add_argument('--output', type=str, default=None,
+                       help=f'Output file for detailed results (default: {default_output})')
+    parser.add_argument('--max-tokens', type=int, default=-1,
+                       help='Maximum tokens to generate per request (default: -1 for unbound)')
     parser.add_argument('--timeout', type=int, default=300,
                        help='Request timeout in seconds (default: 300)')
     
     args = parser.parse_args()
+    
+    # Set default output if not provided
+    if args.output is None:
+        args.output = default_output
     
     runner = BenchmarkRunner(base_url=args.url, timeout=args.timeout)
     
@@ -553,6 +643,10 @@ Examples:
     
     # Save results
     runner.save_results(all_results, summary, args.output)
+    
+    # Save markdown report
+    md_output = args.output.replace('.json', '.md')
+    runner.save_markdown_report(all_results, summary, md_output)
     
     # Compare with expected performance (RK3588)
     if summary.successful_requests > 0:

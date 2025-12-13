@@ -37,6 +37,10 @@ class LoadModelResponse(BaseModel):
     message: str
     model_name: str
     loaded: bool = True
+    
+    model_config = {
+        "protected_namespaces": ()
+    }
 
 
 class UnloadModelResponse(BaseModel):
@@ -50,6 +54,10 @@ class LoadedModelResponse(BaseModel):
     loaded: bool
     model_name: Optional[str] = None
     model_path: Optional[str] = None
+    
+    model_config = {
+        "protected_namespaces": ()
+    }
 
 
 class AvailableModel(BaseModel):
@@ -197,3 +205,41 @@ async def list_available_models():
     except Exception as e:
         logger.error(f"Error listing models: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class DownloadModelRequest(BaseModel):
+    """Request to download a model from Hugging Face"""
+    repo_id: str = Field(..., description="Hugging Face repository ID (e.g. 'ThomasTheMaker/Qwen3-0.6B-RKLLM-1.2.1B')")
+    filename: str = Field(..., description="Filename to download (e.g. 'model.rkllm')")
+    friendly_name: Optional[str] = Field(None, description="Optional friendly name for the model folder")
+
+
+@router.post("/download")
+async def download_model(request: DownloadModelRequest):
+    """
+    Download a model from Hugging Face Hub.
+    Returns a streaming response with progress updates (SSE).
+    
+    Endpoint: POST /v1/models/download
+    """
+    from fastapi.responses import StreamingResponse
+    import json
+    
+    async def event_generator():
+        try:
+            # Get generator from model manager
+            progress_gen = model_manager.download_model_from_hf(
+                repo_id=request.repo_id,
+                filename=request.filename,
+                friendly_name=request.friendly_name
+            )
+            
+            for progress in progress_gen:
+                # Yield SSE event
+                yield f"data: {json.dumps(progress)}\n\n"
+                
+        except Exception as e:
+            error_data = {"status": "failed", "error": str(e)}
+            yield f"data: {json.dumps(error_data)}\n\n"
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

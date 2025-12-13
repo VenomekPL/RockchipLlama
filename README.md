@@ -25,77 +25,91 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Start server
-./start_server.sh
+# 2. Download default models (Qwen3-0.6B)
+python scripts/download_models.py
 
-# 3. Load model & chat
-curl -X POST http://localhost:8080/v1/models/load \
+# 3. Start server (sudo required for performance tuning)
+sudo ./start_server.sh
+
+# 4. Load model & chat
+curl -X POST http://localhost:8021/v1/models/load \
   -d '{"model": "qwen3-0.6b"}'
 
-curl -X POST http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:8021/v1/chat/completions \
   -d '{
     "model": "qwen3-0.6b",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
 
-Server available at: http://localhost:8080  
-Interactive docs: http://localhost:8080/docs
+Server available at: http://localhost:8021  
+Interactive docs: http://localhost:8021/docs
 
-## Performance
+## 📚 Documentation
 
-**📊 [See Full Benchmarks →](docs/BENCHMARKS.md)**
+- **[Scripts & Tools](scripts/README.md)** - Benchmarking, downloading, and utility scripts
+- **[Benchmark Results](benchmarks/README.md)** - Performance reports and comparisons
+- **[Architecture](docs/README.md)** - System design and implementation details
 
-| Model | Tokens/sec | TTFT | Memory | Status |
-|-------|------------|------|--------|--------|
-| Qwen3-0.6B | **15.59** | 295ms | 890 MB | ⭐ **RECOMMENDED** |
-| Qwen3-0.6B + Cache | - | **75ms** | - | 🔥 **23.5x faster!** |
-| Gemma3-1B | 13.50 | 339ms | 1243 MB | ✅ USABLE |
+## 🚀 Performance Tuning
 
-Binary caching reduces Time To First Token by **95.8%** for repeated prompts!
+The server includes a script to lock the RK3588 CPU and NPU clocks to their maximum frequencies for consistent inference speed.
 
-## Project Status
+- **Automatic:** `sudo ./start_server.sh` will attempt to set these frequencies on startup.
+- **Manual:** Run `sudo ./scripts/fix_freq_rk3588.sh` directly.
 
-**✅ Phase 4.1 Complete** - Binary Prompt Caching (23.5x speedup achieved)  
-**✅ Phase 4.2 Complete** - Config-based parameters + RKLLM v1.2.2 upgrade  
-**✅ Phase 4.5 Complete** - Ollama API compatibility
-**✅ Phase 4.7 Complete** - RKLLM v1.2.3 Upgrade & Chat Templates
-**✅ Queue-Based Concurrency** - Stable concurrent request handling
+*Note: These settings reset on reboot.*
 
-**Next Steps:**
-- Phase 4.3: LongRoPE implementation (requires model rebuilding with toolkit)
-- Phase 4.4: HuggingFace integration
-- Embeddings API (pending compatible RKLLM embedding model)
+## 📦 Model Management
 
----
+### Default Models
+Run `python scripts/download_models.py` to fetch the recommended models:
+- **qwen3-0.6b**: Fast, efficient chat model (16k context)
+- **qwen3-0.6b-embedding**: Compatible embedding model
 
-## API Reference
-
-### Chat Completions (OpenAI Compatible)
+### Custom Models
+To add your own RKLLM models (e.g., from HuggingFace):
+1. Create a folder in `models/` with your desired model name (e.g., `models/my-llama/`).
+2. Place the `.rkllm` file inside that folder.
+3. The server will automatically detect it as `my-llama`.
 
 ```bash
-POST /v1/chat/completions
-Content-Type: application/json
-
-{
-  "model": "qwen3-0.6b",
-  "messages": [
-    {"role": "system", "content": "You are a helpful assistant"},
-    {"role": "user", "content": "Hello!"}
-  ],
-  "temperature": 0.7,
-  "max_tokens": 512
-}
+models/
+├── qwen3-0.6b/           # Model ID: qwen3-0.6b
+│   └── model.rkllm
+└── my-llama/             # Model ID: my-llama
+    └── llama-3-8b.rkllm
 ```
 
-**With Binary Cache (23.5x faster!):**
-```bash
-# 1. Create cache once
-POST /v1/cache/qwen3-0.6b
-{"cache_name": "system", "prompt": "You are a coding assistant..."}
+## 🔥 Binary Caching (Manual)
 
-# 2. Use in every request
-POST /v1/chat/completions
+Reduce Time To First Token (TTFT) by saving the NPU state for common prompts (like system prompts).
+
+**1. Create a Cache:**
+```bash
+curl -X POST http://localhost:8021/v1/cache/qwen3-0.6b \
+  -d '{
+    "cache_name": "system_prompt",
+    "prompt": "You are a helpful assistant..."
+  }'
+```
+
+**2. Use the Cache:**
+The server currently does not automatically apply caches. This feature is for manual state management and testing. Future updates will integrate this into the chat completion flow.
+
+## 📊 Benchmarking
+
+Use the included suite to test performance on your hardware.
+
+```bash
+# Run full benchmark suite
+python scripts/benchmark.py --model qwen3-0.6b --type all
+
+# Generate Markdown report
+python scripts/benchmark.py --model qwen3-0.6b --output benchmarks/my_report.json
+```
+
+See **[benchmarks/README.md](benchmarks/README.md)** for detailed results.
 {
   "model": "qwen3-0.6b",
   "use_cache": "system",  # ← 75ms vs 1775ms!
@@ -140,7 +154,7 @@ DELETE /v1/cache/{model}/{cache_name}
 from openai import OpenAI
 
 client = OpenAI(
-    base_url='http://localhost:8080/v1',
+    base_url='http://localhost:8021/v1',
     api_key='dummy'  # Not required but OpenAI client needs something
 )
 
@@ -166,7 +180,7 @@ print(response.choices[0].message.content)
 
 ```bash
 # Create a binary cache (saves NPU prefill state)
-curl -X POST http://localhost:8080/v1/cache/qwen3-0.6b \
+curl -X POST http://localhost:8021/v1/cache/qwen3-0.6b \
   -H 'Content-Type: application/json' \
   -d '{
     "cache_name": "system",
@@ -183,7 +197,7 @@ curl -X POST http://localhost:8080/v1/cache/qwen3-0.6b \
 }
 
 # Use the cache in chat (TTFT: 1775ms → 75.2ms!)
-curl -X POST http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:8021/v1/chat/completions \
   -d '{
     "use_cache": "system",
     "messages": [{"role": "user", "content": "Hello!"}]
@@ -198,10 +212,10 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 }
 
 # List caches
-curl http://localhost:8080/v1/cache/qwen3-0.6b
+curl http://localhost:8021/v1/cache/qwen3-0.6b
 
 # Delete cache
-curl -X DELETE http://localhost:8080/v1/cache/qwen3-0.6b/system
+curl -X DELETE http://localhost:8021/v1/cache/qwen3-0.6b/system
 ```
 
 ## Configuration
@@ -236,7 +250,7 @@ Runtime configuration without server restart!
 **Server Settings** (`config/settings.py` or `.env`):
 ```bash
 HOST=0.0.0.0
-PORT=8080
+PORT=8021
 MODELS_DIR=./models
 RKLLM_LIB_PATH=/usr/lib/librkllmrt.so
 ```
@@ -264,6 +278,20 @@ RKLLM_LIB_PATH=/usr/lib/librkllmrt.so
 - 🏗️ **[docs/queue_architecture.md](docs/queue_architecture.md)** - Queue-based concurrency design
 - 🔧 **[docs/rkllm.md](docs/rkllm.md)** - RKLLM technical reference
 - 📖 **[docs/copilot.md](docs/copilot.md)** - Full changelog & design notes
+
+## Benchmarking
+
+Run the comprehensive benchmark suite to test performance and quality:
+
+```bash
+# Run all 10 tests (5 performance, 5 quality) with unbound tokens
+python scripts/benchmark.py
+```
+
+## Logging
+
+Server logging is set to `WARNING` level by default to reduce noise.
+To change this, edit `config/settings.py`.
 
 ---
 

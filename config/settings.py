@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     
     # Server settings
     host: str = "0.0.0.0"
-    port: int = 8080
-    log_level: str = "info"
+    port: int = 8021
+    log_level: str = "warning"
     
     # Model settings
     models_dir: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")

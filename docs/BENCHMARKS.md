@@ -1,8 +1,8 @@
 # 🚀 RockchipLlama Performance Benchmarks
 
-**Last Updated:** October 20, 2025  
+**Last Updated:** December 13, 2025  
 **Hardware:** Rockchip RK3588 (3 NPU cores @ 1.0 GHz, Big cores @ 2.3 GHz)  
-**RKLLM Version:** 1.2.1
+**RKLLM Version:** 1.2.3
 
 ---
 
@@ -12,19 +12,45 @@ All models tested with w8a8 quantization, 16K context, 3 NPU cores.
 
 | Model | Size | Tokens/sec | TTFT (avg) | Memory | Context | Status |
 |-------|------|------------|------------|--------|---------|--------|
-| **Qwen3-0.6B** ⭐ | 909 MB | **15.59** | 295ms | 890 MB | 16K | ✅ **RECOMMENDED** |
+| **Qwen3-0.6B** ⭐ | 909 MB | **11.41** | 280ms | 890 MB | 16K | ✅ **RECOMMENDED** (Thinking Mode) |
 | **Gemma3-1B** | 1.5 GB | **13.50** | 339ms | 1243 MB | 4K | ✅ USABLE |
 | Qwen3-4B | 5.0 GB | **3.13** | 1775ms | 5027 MB | 16K | ⚠️ TOO SLOW |
 | Gemma3-270M | 616 MB | ~~29.80~~ | 285ms | 654 MB | 16K | ❌ REMOVED (garbage output) |
 
 ### Performance Notes
 
-- **Qwen3-0.6B**: Best balance of speed, quality, and context length (16K). **Production ready.**
+- **Qwen3-0.6B (Thinking Mode)**: 
+  - **Speed**: ~11.4 tokens/sec (Slightly lower than raw 15.59 t/s due to Thinking overhead)
+  - **Quality**: Significantly improved reasoning with Chain-of-Thought enabled.
+  - **Stability**: 100% pass rate on complex tasks (coding, planning, essay writing).
+  - **Context Leakage**: Fixed via "Smart Caching" (automatic KV cache clearing).
+
 - **Gemma3-1B**: Good speed, excellent quality, but limited to 4K context (needs 16K reconversion).
 - **Qwen3-4B**: Excellent quality but too slow for production (< 5 tok/s minimum viable).
 - **Gemma3-270M**: Fast but produces incoherent output - not usable despite speed.
 
 **Production Minimum:** 5 tokens/sec for acceptable user experience.
+
+---
+
+## 🧠 Thinking Mode & Stability (Phase 4.10)
+
+**New Feature (Dec 2025):** "Thinking Mode" enables internal Chain-of-Thought reasoning for Qwen/DeepSeek models.
+
+### Stability Improvements
+- **Context Leakage Fixed**: Implemented "Smart Caching" logic. If the prompt context changes, the NPU KV cache is automatically cleared. This prevents hallucinations from previous requests (e.g., "weather app" context leaking into "Roman Empire" essay).
+- **Penalty Tuning**: Optimized `frequency_penalty` and `presence_penalty` to **0.1**. This prevents the model from outputting garbage characters during long reasoning chains.
+
+### Benchmark Results (Thinking Mode Enabled)
+**Date:** Dec 13, 2025  
+**Model:** Qwen3-0.6B
+
+| Metric | Result | Notes |
+|--------|--------|-------|
+| **Speed** | 11.41 t/s | Consistent across 10 tests |
+| **TTFT** | 280 ms | Fast initial response |
+| **Quality** | High | No hallucinations, coherent long-form output |
+| **Stability** | 100% | 10/10 tests passed |
 
 ---
 

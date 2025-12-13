@@ -8,6 +8,7 @@ import time
 import uuid
 import logging
 import os
+import asyncio
 from typing import AsyncGenerator, Optional, List
 import json
 
@@ -106,31 +107,44 @@ async def ensure_model_loaded(preferred_model: Optional[str] = None):
 
 def format_chat_prompt(messages: list) -> str:
     """
-    Format chat messages into a single prompt string
-    
-    Args:
-        messages: List of chat messages
-        
-    Returns:
-        Formatted prompt string
+    Format chat messages into a single prompt string using config template
     """
+    chat_tmpl = inference_config.get('chat_template', {})
+    user_prefix = chat_tmpl.get('user_prefix', 'User: ')
+    
+    # Check if we are using ChatML (Qwen/DeepSeek style)
+    is_chatml = "<|im_start|>" in user_prefix
+    
     prompt_parts = []
     
     for msg in messages:
         role = msg.role if hasattr(msg, 'role') else msg.get('role', 'user')
         content = msg.content if hasattr(msg, 'content') else msg.get('content', '')
         
-        if role == "system":
-            prompt_parts.append(f"System: {content}")
-        elif role == "user":
-            prompt_parts.append(f"User: {content}")
-        elif role == "assistant":
-            prompt_parts.append(f"Assistant: {content}")
+        if is_chatml:
+            # Robust ChatML formatting
+            if role == "system":
+                prompt_parts.append(f"<|im_start|>system\n{content}<|im_end|>\n")
+            elif role == "user":
+                prompt_parts.append(f"<|im_start|>user\n{content}<|im_end|>\n")
+            elif role == "assistant":
+                prompt_parts.append(f"<|im_start|>assistant\n{content}<|im_end|>\n")
+        else:
+            # Fallback to generic format
+            if role == "system":
+                prompt_parts.append(f"System: {content}\n")
+            elif role == "user":
+                prompt_parts.append(f"User: {content}\n")
+            elif role == "assistant":
+                prompt_parts.append(f"Assistant: {content}\n")
     
-    # Add final assistant prompt
-    prompt_parts.append("Assistant:")
+    # Add trigger for assistant response
+    if is_chatml:
+        prompt_parts.append("<|im_start|>assistant\n")
+    else:
+        prompt_parts.append("Assistant:")
     
-    return "\n".join(prompt_parts)
+    return "".join(prompt_parts)
 
 
 @router.post("/chat/completions", response_model=ChatCompletionResponse)
@@ -191,7 +205,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
             top_k=request.top_k or 20,  # User preference: 20
             repeat_penalty=getattr(request, 'repeat_penalty', None) or 1.1,
             binary_cache_path=binary_cache_path,
-            save_binary_cache=False  # Load, don't save
+            save_binary_cache=False,  # Load, don't save
+            stop=request.stop if isinstance(request.stop, list) else [request.stop] if request.stop else None
         )
         
         # Log performance stats if available
@@ -250,13 +265,14 @@ async def stream_chat_completion(
     try:
         # Buffer for collecting generated text
         generated_text = ""
-        chunk_buffer = []  # Store chunks to yield
+        chunk_queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
         
         def streaming_callback(token: str):
-            """Callback for streaming tokens - stores chunks to be yielded"""
+            """Callback for streaming tokens - puts chunks into queue"""
             nonlocal generated_text
             generated_text += token
-            # Create and buffer chunk
+            # Create chunk
             chunk = ChatCompletionChunk(
                 id=completion_id,
                 created=created_time,
@@ -267,7 +283,8 @@ async def stream_chat_completion(
                     "finish_reason": None
                 }]
             )
-            chunk_buffer.append(chunk)
+            # Put into queue safely from thread
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
         
         # Ensure model is loaded (auto-load if needed)
         try:
@@ -278,8 +295,8 @@ async def stream_chat_completion(
             yield f"data: {json.dumps(error_data)}\n\n"
             return
         
-        # Generate with streaming (this will fill chunk_buffer via callback)
-        _, perf_stats = await current_model.generate_async(
+        # Create task for generation
+        generation_task = asyncio.create_task(current_model.generate_async(
             prompt=prompt,
             max_new_tokens=request.max_tokens or 512,
             temperature=request.temperature or 0.8,
@@ -288,18 +305,34 @@ async def stream_chat_completion(
             repeat_penalty=getattr(request, 'repeat_penalty', None) or 1.1,
             callback=streaming_callback,
             binary_cache_path=binary_cache_path,
-            save_binary_cache=False  # Load, don't save
-        )
+            save_binary_cache=False,  # Load, don't save
+            stop=request.stop if isinstance(request.stop, list) else [request.stop] if request.stop else None
+        ))
         
-        # Yield all buffered chunks
-        for chunk in chunk_buffer:
+        # Consume queue while generation is running
+        while not generation_task.done():
+            try:
+                # Wait for next chunk with timeout to check task status
+                chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.05)
+                yield f"data: {chunk.model_dump_json()}\n\n"
+            except asyncio.TimeoutError:
+                continue
+        
+        # Flush remaining items in queue
+        while not chunk_queue.empty():
+            chunk = await chunk_queue.get()
             yield f"data: {chunk.model_dump_json()}\n\n"
+            
+        # Get result from task (to raise exceptions if any and get perf stats)
+        _, perf_stats = await generation_task
         
         # Send final chunk with finish_reason and perf stats
         usage_data = {
             "prompt_tokens": len(prompt.split()),
             "completion_tokens": len(generated_text.split()),
-            "total_tokens": len(prompt.split()) + len(generated_text.split())
+            "total_tokens": len(prompt.split()) + len(generated_text.split()),
+            "cache_hit": binary_cache_path is not None,
+            "cached_prompts": [request.use_cache] if binary_cache_path else None
         }
         
         # Add RKLLM perf stats if available

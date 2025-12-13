@@ -1,3 +1,7 @@
+# Benchmarks
+benchmarks/*
+!benchmarks/README.md
+
 # Python
 __pycache__/
 *.py[cod]
@@ -221,3 +225,7 @@ cache/*/*.rkllm_cache
 
 # Benchmark results
 benchmarks/
+
+# Logs
+logs/
+*.log

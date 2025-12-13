@@ -20,9 +20,12 @@ from config.settings import settings
 from models.rkllm_model import RKLLMModel
 from models.model_manager import model_manager
 
+from contextlib import asynccontextmanager
+
 # Configure logging
+log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout)
@@ -31,13 +34,45 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize resources on startup and cleanup on shutdown"""
+    # Startup
+    logger.info("=" * 60)
+    logger.info("🚀 RockchipLlama Server Starting")
+    logger.info("=" * 60)
+    logger.info(f"Models directory: {settings.models_dir}")
+    logger.info(f"Default model: {settings.default_model}")
+    logger.info(f"NPU cores: {settings.num_npu_core}")
+    logger.info(f"RKLLM library: {settings.rkllm_lib_path}")
+    
+    # Check if models directory exists
+    if not os.path.exists(settings.models_dir):
+        logger.warning(f"Models directory not found: {settings.models_dir}")
+    else:
+        # List available models using ModelManager
+        available_models = model_manager.list_available_models()
+        logger.info(f"Available models: {len(available_models)}")
+        for model in available_models:
+            logger.info(f"  - {model['name']} ({model['filename']})")
+    
+    logger.info("✅ Server initialization complete")
+    logger.info("=" * 60)
+    
+    yield
+    
+    # Shutdown
+    logger.info("🛑 Server shutting down...")
+    # TODO: Cleanup loaded models
+
 # Create FastAPI app
 app = FastAPI(
     title="RockchipLlama API",
     description="OpenAI-compatible API server for Rockchip NPU acceleration",
     version="0.1.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Add CORS middleware
@@ -53,40 +88,6 @@ app.add_middleware(
 app.include_router(openai_router)
 app.include_router(model_router)
 app.include_router(ollama_router)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize resources on startup"""
-    logger.info("=" * 60)
-    logger.info("🚀 RockchipLlama Server Starting")
-    logger.info("=" * 60)
-    logger.info(f"Models directory: {settings.models_dir}")
-    logger.info(f"Default model: {settings.default_model}")
-    logger.info(f"NPU cores: {settings.num_npu_core}")
-    logger.info(f"RKLLM library: {settings.rkllm_lib_path}")
-    
-    # Check if models directory exists
-    if not os.path.exists(settings.models_dir):
-        logger.warning(f"Models directory not found: {settings.models_dir}")
-    else:
-        # List available models
-        model_files = [f for f in os.listdir(settings.models_dir) if f.endswith('.rkllm')]
-        logger.info(f"Available models: {len(model_files)}")
-        for model_file in model_files:
-            logger.info(f"  - {model_file}")
-    
-    # TODO: Initialize default model
-    # For now, we'll load models on-demand
-    logger.info("✅ Server initialization complete")
-    logger.info("=" * 60)
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup resources on shutdown"""
-    logger.info("🛑 Server shutting down...")
-    # TODO: Cleanup loaded models
 
 
 @app.get("/")

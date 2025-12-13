@@ -108,8 +108,21 @@ class ModelManager:
         model_count = 0
         
         # Scan for model folders
-        for folder_name in os.listdir(self.models_dir):
+        print(f"DEBUG: Scanning directory: {self.models_dir}")
+        logger.info(f"Scanning directory: {self.models_dir}")
+        try:
+            entries = os.listdir(self.models_dir)
+            print(f"DEBUG: Found entries: {entries}")
+            logger.info(f"Found entries: {entries}")
+        except Exception as e:
+            print(f"DEBUG: Error listing directory: {e}")
+            logger.error(f"Error listing directory: {e}")
+            return
+
+        for folder_name in entries:
             folder_path = os.path.join(self.models_dir, folder_name)
+            print(f"DEBUG: Checking entry: {folder_name}, path: {folder_path}, isdir: {os.path.isdir(folder_path)}")
+            logger.info(f"Checking entry: {folder_name}, path: {folder_path}, isdir: {os.path.isdir(folder_path)}")
             
             # Skip files in root models directory
             if not os.path.isdir(folder_path):
@@ -117,8 +130,10 @@ class ModelManager:
             
             # Find .rkllm files in this folder
             rkllm_files = [f for f in os.listdir(folder_path) if f.endswith('.rkllm')]
+            print(f"DEBUG: Folder {folder_name} files: {rkllm_files}")
             
             if not rkllm_files:
+                print(f"DEBUG: No .rkllm file found in {folder_path}")
                 logger.warning(f"No .rkllm file found in {folder_path}")
                 continue
             
@@ -150,6 +165,7 @@ class ModelManager:
             
             # Store by friendly name only (folder name)
             self._model_cache[friendly_name] = model_info
+            print(f"DEBUG: Added model to cache: {friendly_name}")
             model_count += 1
             
             logger.info(
@@ -265,29 +281,34 @@ class ModelManager:
         Returns:
             List of model info dictionaries with friendly names
         """
+        print(f"DEBUG: list_available_models called. Cache size: {len(self._model_cache)}")
         # Return unique models (avoid duplicates from multiple lookup keys)
         seen_paths = set()
         unique_models = []
         
-        for model_info in self._model_cache.values():
+        for key, model_info in self._model_cache.items():
             path = model_info['path']
+            print(f"DEBUG: Processing cache entry: {key} -> {path}")
             if path not in seen_paths:
-                file_size = os.path.getsize(path)
-                model_entry = {
-                    'name': model_info['id'],  # Friendly name
-                    'friendly_name': model_info['id'],
-                    'filename': model_info['filename'],
-                    'path': path,
-                    'context_size': model_info['context_size'],
-                    'size_bytes': file_size,
-                    'size_mb': round(file_size / (1024 * 1024), 2),
-                    'loaded': (model_info['id'] == self.current_model_name or 
-                              model_info['filename'].replace('.rkllm', '') == self.current_model_name),
-                    'object': 'model',
-                    'owned_by': 'rkllm'
-                }
-                unique_models.append(model_entry)
-                seen_paths.add(path)
+                try:
+                    file_size = os.path.getsize(path)
+                    model_entry = {
+                        'name': model_info['id'],  # Friendly name
+                        'friendly_name': model_info['id'],
+                        'filename': model_info['filename'],
+                        'path': path,
+                        'context_size': model_info['context_size'],
+                        'size_bytes': file_size,
+                        'size_mb': round(file_size / (1024 * 1024), 2),
+                        'loaded': (model_info['id'] == self.current_model_name or 
+                                  model_info['filename'].replace('.rkllm', '') == self.current_model_name),
+                        'object': 'model',
+                        'owned_by': 'rkllm'
+                    }
+                    unique_models.append(model_entry)
+                    seen_paths.add(path)
+                except Exception as e:
+                    print(f"DEBUG: Error getting info for {path}: {e}")
         
         return sorted(unique_models, key=lambda x: x['size_bytes'])
     
@@ -470,6 +491,105 @@ class ModelManager:
             'context_size': model_details['context_size'] if model_details else None,
             'filename': model_details['filename'] if model_details else None
         }
+
+    def download_model_from_hf(self, repo_id: str, filename: str, friendly_name: Optional[str] = None) -> Any:
+        """
+        Download a model from Hugging Face Hub.
+        Returns a generator that yields progress updates.
+        """
+        from huggingface_hub import hf_hub_download, get_hf_file_metadata, hf_hub_url
+        import time
+        import shutil
+        
+        # Determine friendly name if not provided
+        if not friendly_name:
+            friendly_name = filename.replace('.rkllm', '').lower()
+            # Clean up name
+            friendly_name = re.sub(r'[^\w\-_]', '_', friendly_name)
+            
+        target_dir = os.path.join(self.models_dir, friendly_name)
+        os.makedirs(target_dir, exist_ok=True)
+        
+        logger.info(f"Starting download: {repo_id}/{filename} -> {target_dir}")
+        
+        # Shared state for progress tracking
+        progress_state = {
+            "status": "starting",
+            "downloaded": 0,
+            "total": 0,
+            "percent": 0,
+            "speed": 0,
+            "error": None,
+            "completed": False
+        }
+        
+        def download_thread():
+            try:
+                # Get file info first to know total size
+                try:
+                    url = hf_hub_url(repo_id, filename)
+                    meta = get_hf_file_metadata(url)
+                    progress_state["total"] = meta.size
+                except Exception as e:
+                    logger.warning(f"Could not get metadata: {e}")
+                    progress_state["total"] = 0
+
+                progress_state["status"] = "downloading"
+                
+                # Run download
+                hf_hub_download(
+                    repo_id=repo_id,
+                    filename=filename,
+                    local_dir=target_dir,
+                    local_dir_use_symlinks=False,
+                    resume_download=True
+                )
+                
+                progress_state["status"] = "processing"
+                progress_state["percent"] = 100
+                progress_state["completed"] = True
+                
+                # Trigger discovery to find the new model
+                self._discover_models()
+                
+            except Exception as e:
+                logger.error(f"Download failed: {e}")
+                progress_state["status"] = "failed"
+                progress_state["error"] = str(e)
+
+        # Start download in background thread
+        thread = threading.Thread(target=download_thread)
+        thread.start()
+        
+        # Generator to yield progress
+        while not progress_state["completed"] and progress_state["status"] != "failed":
+            # Monitor file size if possible
+            try:
+                # Find the partial file or the final file
+                final_path = os.path.join(target_dir, filename)
+                
+                current_size = 0
+                if os.path.exists(final_path):
+                    current_size = os.path.getsize(final_path)
+                
+                # If we can't find the file, check for any file in that dir growing
+                if current_size == 0:
+                    for f in os.listdir(target_dir):
+                        fp = os.path.join(target_dir, f)
+                        if os.path.isfile(fp):
+                            current_size = max(current_size, os.path.getsize(fp))
+                
+                progress_state["downloaded"] = current_size
+                if progress_state["total"] > 0:
+                    progress_state["percent"] = (current_size / progress_state["total"]) * 100
+                
+            except Exception:
+                pass
+            
+            yield progress_state
+            time.sleep(0.5)
+            
+        yield progress_state
 
 
 # Global model manager instance

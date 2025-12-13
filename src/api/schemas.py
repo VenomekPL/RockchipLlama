@@ -46,8 +46,9 @@ class ChatCompletionRequest(BaseModel):
                     "then new messages are processed on top of it."
     )
     
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "protected_namespaces": (),
+        "json_schema_extra": {
             "example": {
                 "model": "gemma-3-270m",
                 "messages": [
@@ -59,6 +60,7 @@ class ChatCompletionRequest(BaseModel):
                 "use_cache": "system"
             }
         }
+    }
 
 
 class ChatCompletionChoice(BaseModel):
@@ -102,7 +104,7 @@ class ChatCompletionChunk(BaseModel):
     created: int
     model: str
     choices: List[Dict[str, Any]]
-    usage: Optional[Dict[str, Any]] = None  # Performance stats in final chunk
+    usage: Optional[Usage] = None  # Performance stats in final chunk
 
 
 class ModelInfo(BaseModel):
