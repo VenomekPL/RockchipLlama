@@ -45,7 +45,16 @@ curl -X POST http://localhost:8021/v1/chat/completions \
 Server available at: http://localhost:8021  
 Interactive docs: http://localhost:8021/docs
 
-## 📚 Documentation
+## � In Development (Phase 6)
+
+### Multimodal & Image Generation
+- **Vision-Language Models**: Architecture designed for "Split Brain" processing (Python wrapper + C++ image encoder).
+- **Stable Diffusion**: 
+  - Initial implementation of RKNN-LCM pipeline.
+  - **Status**: Currently blocked by NPU driver version mismatch (Requires Driver v0.9.8+, current system has v0.9.7).
+  - **Next Step**: System OS upgrade required to unlock NPU features for image generation.
+
+## �📚 Documentation
 
 - **[Scripts & Tools](scripts/README.md)** - Benchmarking, downloading, and utility scripts
 - **[Benchmark Results](benchmarks/README.md)** - Performance reports and comparisons

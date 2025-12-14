@@ -1641,3 +1641,19 @@ Model Size    Speed (tok/s)    Production Viable
   - **Resolution Strategy**: User must update the OS/Kernel to a version with Driver 0.9.8+, OR downgrade the runtime libraries to match Driver 0.9.7 (approx v1.6.0/v2.0.0).
   - **Action**: Document findings and advise user to perform system update (`sudo apt upgrade` or flash newer image).
 
+### Session: December 14, 2025 - System Upgrade Decision
+
+- **Situation**: 
+  - Stable Diffusion (UNet) Segfaults confirmed to be caused by Driver (v0.9.7) vs Runtime (v2.3.2) mismatch.
+  - Driver v0.9.8 is required but is built-in to the kernel, preventing manual update.
+  - `apt full-upgrade` did not bring the newer kernel/driver.
+- **Decision**: 
+  - **Flash New OS**: User will flash **Ubuntu 22.04 for Orange Pi 5 Max** (Joshua Riek v2.4.0) which supports the hardware and likely contains the updated BSP/Drivers.
+  - **Backup**: Code committed to git. Models will be re-downloaded or restored from backup after flashing.
+- **Next Steps (After Flash)**:
+  1. Clone repository.
+  2. Run `scripts/download_models.py` (or copy from backup).
+  3. Verify `dmesg | grep rknpu` shows version 0.9.8+.
+  4. Resume Stable Diffusion testing.
+
+
