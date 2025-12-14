@@ -22,4 +22,4 @@ echo ""
 
 mkdir -p ../logs
 timestamp=$(date +%s)
-python main.py 2>&1 | tee -a ../logs/serverlog_${timestamp}.log
+python -u main.py 2>&1 | tee -a ../logs/serverlog_${timestamp}.log

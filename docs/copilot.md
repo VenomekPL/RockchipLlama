@@ -440,7 +440,54 @@ RockchipLlama/
 - ✅ All working features documented and benchmarked
 - ✅ Production-ready with configuration examples
 
-### Phase 5: Docker Containerization
+### Phase 5: Multimodal Support (Vision-Language) 👁️ (IN PROGRESS)
+- [x] **Architecture Design**:
+  - [x] "Split Brain" architecture: Python wrapper + C++ `imgenc` binary
+  - [x] Documented in `docs/multimodal_architecture.md`
+- [x] **Core Implementation**:
+  - [x] Updated `RKLLMModel` to handle `image_data`
+  - [x] Implemented `_encode_image` using `subprocess` to call `imgenc`
+  - [x] Added `RKLLMMultiModalInput` ctypes structure
+
+### Phase 6: Image Generation (Stable Diffusion) 🎨 (IN PROGRESS)
+- [x] **Initial Setup**:
+  - [x] Downloaded `unet_lcm_512.rknn` and related components
+  - [x] Created `scripts/run_rknn-lcm.py` pipeline script
+- [x] **Investigation & Debugging**:
+  - [x] **Issue**: `Segmentation fault` during `rknn.inference()`
+  - [x] **Root Cause Analysis**:
+    - Verified input signature: 4 inputs (`sample`, `timestep`, `encoder_hidden_states`, `timestep_cond`)
+    - Verified memory alignment: NPU driver requires 4096-byte alignment
+    - Created C reproduction tool (`test_unet_mem.c`) to bypass Python
+    - **Conclusion**: Model file `unet_lcm_512.rknn` is likely incompatible with current NPU driver (v0.9.7) or Runtime (v2.3.2)
+- [ ] **Next Steps**:
+  - [ ] **Driver Update**: Check for newer NPU drivers in `external/rknn-llm`
+  - [ ] **Model Strategy**: Find alternative pre-converted models or perform local conversion
+  - [ ] **Integration**: Once stable, integrate into `/v1/images/generations` endpoint
+
+## Session Notes (December 14, 2025)
+- **Stable Diffusion Debugging**:
+  - Spent significant time debugging a Segfault in the UNet inference.
+  - Confirmed the model requires 4 inputs, not 3.
+  - Even with perfect memory alignment (using `posix_memalign` in C), the crash persists inside the NPU driver execution.
+  - This strongly suggests a binary incompatibility between the `.rknn` model and the installed driver/runtime.
+- **Plan**:
+  1. Check/Update NPU Driver.
+  2. Search for a better/compatible model file.
+  3. If all else fails, use the user's x86 Strix Halo machine to convert models manually.
+- [x] **API Integration**:
+  - [x] Updated `openai_routes.py` to parse `image_url` in messages
+  - [x] Implemented ChatML vision token injection (`<|vision_start|>`, etc.)
+  - [x] **Fix**: Switched to `<image>` tag for RKLLM runtime compatibility
+- [x] **Client Tools**:
+  - [x] Created `examples/multimodal_request.py` for testing
+- [ ] **Debugging & Validation**:
+  - [ ] **Issue**: Model returns single token "The" and stops immediately.
+  - [ ] **Attempts**: Fixed `<image>` tag, added newlines, forced `max_new_tokens`.
+  - [ ] **Next**: Verify `imgenc` binary compatibility and runtime signals.
+  - [ ] Benchmark multimodal performance
+
+### Phase 6: Docker Containerization
 - [ ] Create Dockerfile for ARM64
 - [ ] Generate requirements.txt from working venv
 - [ ] Multi-stage Docker build optimization
@@ -1574,5 +1621,23 @@ Model Size    Speed (tok/s)    Production Viable
   - Run benchmarks on new models.
   - Ensure `scripts/fix_freq_rk3588.sh` is run on the device.
 
-```
+### Session: December 14, 2025 - Driver Update Investigation
+
+- **Driver Status**:
+  - **Current Version**: 0.9.7 (verified via logs/system).
+  - **Available Update**: Found `rknpu_driver_0.9.8_20241009.tar.bz2` in `external/rknn-llm/rknpu-driver/`.
+  - **Format**: Source code only (requires kernel compilation).
+- **Analysis**:
+  - The `rknn-llm` submodule provides the *source code* for the NPU driver, not pre-compiled kernel modules (`.ko` files).
+  - Updating the driver requires compiling this source against the specific Linux kernel headers running on the Orange Pi 5.
+  - **CRITICAL FINDING**: The current NPU driver is **built-in** to the kernel (`CONFIG_ROCKCHIP_RKNPU=y`), not a loadable module. It cannot be replaced without recompiling the entire kernel image.
+  - **Version Mismatch Confirmed**:
+    - Kernel Driver: v0.9.7
+    - Runtime Library (`librknnrt.so`): v2.3.2
+    - Python Toolkit (`rknn-toolkit-lite2`): v2.3.2
+    - **Result**: Runtime v2.3.2 sends commands incompatible with Driver v0.9.7, causing the Segfault.
+- **Decision**:
+  - **Driver Update**: IMPOSSIBLE (requires OS/Kernel update).
+  - **Resolution Strategy**: User must update the OS/Kernel to a version with Driver 0.9.8+, OR downgrade the runtime libraries to match Driver 0.9.7 (approx v1.6.0/v2.0.0).
+  - **Action**: Document findings and advise user to perform system update (`sudo apt upgrade` or flash newer image).
 

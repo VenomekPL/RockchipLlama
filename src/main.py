@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from api.openai_routes import router as openai_router
 from api.model_routes import router as model_router
 from api.ollama_routes import router as ollama_router
+from api.image_routes import router as image_router
 from config.settings import settings
 from models.rkllm_model import RKLLMModel
 from models.model_manager import model_manager
@@ -84,10 +85,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.staticfiles import StaticFiles
+
 # Include routers
 app.include_router(openai_router)
 app.include_router(model_router)
 app.include_router(ollama_router)
+app.include_router(image_router, prefix="/v1") # Mount at /v1/images/generations
+
+# Mount SDimages directory for static access
+sd_images_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "SDimages")
+if not os.path.exists(sd_images_dir):
+    os.makedirs(sd_images_dir)
+app.mount("/SDimages", StaticFiles(directory=sd_images_dir), name="SDimages")
 
 
 @app.get("/")

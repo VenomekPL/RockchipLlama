@@ -16,3 +16,13 @@ huggingface_hub>=0.20.0  # For HF model discovery
 
 # Development and debugging
 python-json-logger==2.0.7
+
+# Stable Diffusion Dependencies
+diffusers>=0.24.0
+transformers>=4.36.0
+scipy>=1.11.0
+accelerate>=0.25.0
+diffusers
+transformers
+pillow
+# rknn-toolkit-lite2  # Install manually or via board-specific wheel

@@ -11,6 +11,8 @@ import os
 import asyncio
 from typing import AsyncGenerator, Optional, List
 import json
+import base64
+import requests
 
 from api.schemas import (
     ChatCompletionRequest,
@@ -105,7 +107,7 @@ async def ensure_model_loaded(preferred_model: Optional[str] = None):
     return current_model
 
 
-def format_chat_prompt(messages: list) -> str:
+def format_chat_prompt(messages: list, image_data: bytes = None) -> str:
     """
     Format chat messages into a single prompt string using config template
     """
@@ -120,6 +122,27 @@ def format_chat_prompt(messages: list) -> str:
     for msg in messages:
         role = msg.role if hasattr(msg, 'role') else msg.get('role', 'user')
         content = msg.content if hasattr(msg, 'content') else msg.get('content', '')
+        
+        # Handle multimodal content (list of dicts)
+        if isinstance(content, list):
+            text_content = ""
+            has_image = False
+            for part in content:
+                if hasattr(part, 'type') and part.type == 'text':
+                    text_content += part.text
+                elif isinstance(part, dict) and part.get('type') == 'text':
+                    text_content += part.get('text', '')
+                elif hasattr(part, 'type') and part.type == 'image_url':
+                    has_image = True
+                elif isinstance(part, dict) and part.get('type') == 'image_url':
+                    has_image = True
+            content = text_content
+            
+            # Inject vision tokens if this message had an image
+            if has_image and is_chatml:
+                # RKLLM runtime requires <image> tag for multimodal input
+                # Based on C++ demo: "<image>What is in the image?"
+                content = f"<image>{content}"
         
         if is_chatml:
             # Robust ChatML formatting
@@ -147,6 +170,58 @@ def format_chat_prompt(messages: list) -> str:
     return "".join(prompt_parts)
 
 
+def extract_image_data(messages: list) -> Optional[bytes]:
+    """
+    Extract image data from the last user message.
+    Supports base64 or URL.
+    """
+    for msg in reversed(messages):
+        role = msg.role if hasattr(msg, 'role') else msg.get('role', 'user')
+        if role == 'user':
+            content = msg.content if hasattr(msg, 'content') else msg.get('content', '')
+            if isinstance(content, list):
+                for part in content:
+                    # Handle dict (from JSON)
+                    if isinstance(part, dict) and part.get('type') == 'image_url':
+                        image_url = part.get('image_url', {}).get('url', '')
+                        if image_url.startswith('data:image'):
+                            # Base64
+                            try:
+                                header, encoded = image_url.split(",", 1)
+                                return base64.b64decode(encoded)
+                            except Exception as e:
+                                logger.error(f"Failed to decode base64 image: {e}")
+                                return None
+                        elif image_url.startswith('http'):
+                            # URL
+                            try:
+                                resp = requests.get(image_url, timeout=10)
+                                resp.raise_for_status()
+                                return resp.content
+                            except Exception as e:
+                                logger.error(f"Failed to download image: {e}")
+                                return None
+                    # Handle Pydantic model
+                    elif hasattr(part, 'type') and part.type == 'image_url':
+                         image_url = part.image_url.url
+                         if image_url.startswith('data:image'):
+                            try:
+                                header, encoded = image_url.split(",", 1)
+                                return base64.b64decode(encoded)
+                            except Exception as e:
+                                logger.error(f"Failed to decode base64 image: {e}")
+                                return None
+                         elif image_url.startswith('http'):
+                            try:
+                                resp = requests.get(image_url, timeout=10)
+                                resp.raise_for_status()
+                                return resp.content
+                            except Exception as e:
+                                logger.error(f"Failed to download image: {e}")
+                                return None
+    return None
+
+
 @router.post("/chat/completions", response_model=ChatCompletionResponse)
 async def create_chat_completion(request: ChatCompletionRequest):
     """
@@ -166,6 +241,9 @@ async def create_chat_completion(request: ChatCompletionRequest):
         
         # Format messages into prompt
         prompt = format_chat_prompt(request.messages)
+        
+        # Extract image data if present
+        image_data = extract_image_data(request.messages)
         
         # Setup binary cache if requested
         binary_cache_path = None
@@ -191,7 +269,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
                     request=request,
                     completion_id=completion_id,
                     created_time=created_time,
-                    binary_cache_path=binary_cache_path
+                    binary_cache_path=binary_cache_path,
+                    image_data=image_data
                 ),
                 media_type="text/event-stream"
             )
@@ -204,9 +283,11 @@ async def create_chat_completion(request: ChatCompletionRequest):
             top_p=request.top_p or 0.9,
             top_k=request.top_k or 20,  # User preference: 20
             repeat_penalty=getattr(request, 'repeat_penalty', None) or 1.1,
+            enable_thinking=request.enable_thinking,
             binary_cache_path=binary_cache_path,
             save_binary_cache=False,  # Load, don't save
-            stop=request.stop if isinstance(request.stop, list) else [request.stop] if request.stop else None
+            stop=request.stop if isinstance(request.stop, list) else [request.stop] if request.stop else None,
+            image_data=image_data
         )
         
         # Log performance stats if available
@@ -252,7 +333,8 @@ async def stream_chat_completion(
     request: ChatCompletionRequest,
     completion_id: str,
     created_time: int,
-    binary_cache_path: Optional[str] = None
+    binary_cache_path: Optional[str] = None,
+    image_data: Optional[bytes] = None
 ) -> AsyncGenerator[str, None]:
     """
     Stream chat completion tokens
@@ -261,6 +343,7 @@ async def stream_chat_completion(
     
     Args:
         binary_cache_path: Path to binary cache file to load
+        image_data: Optional image data for multimodal inference
     """
     try:
         # Buffer for collecting generated text
@@ -303,10 +386,12 @@ async def stream_chat_completion(
             top_p=request.top_p or 0.9,
             top_k=request.top_k or 20,  # User preference: 20
             repeat_penalty=getattr(request, 'repeat_penalty', None) or 1.1,
+            enable_thinking=request.enable_thinking,
             callback=streaming_callback,
             binary_cache_path=binary_cache_path,
             save_binary_cache=False,  # Load, don't save
-            stop=request.stop if isinstance(request.stop, list) else [request.stop] if request.stop else None
+            stop=request.stop if isinstance(request.stop, list) else [request.stop] if request.stop else None,
+            image_data=image_data
         ))
         
         # Consume queue while generation is running

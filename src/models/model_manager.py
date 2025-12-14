@@ -16,6 +16,7 @@ if str(_project_root) not in sys.path:
 
 from config.settings import settings
 from .rkllm_model import RKLLMModel
+from .stable_diffusion import StableDiffusionRKNN
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class ModelManager:
         if not hasattr(self, 'initialized'):
             self.current_model: Optional[RKLLMModel] = None
             self.current_model_name: Optional[str] = None
+            self.sd_model: Optional[StableDiffusionRKNN] = None
             self.models_dir = settings.models_dir
             self._model_cache: Dict[str, Dict[str, Any]] = {}
             self._instance_lock = threading.Lock()
@@ -119,6 +121,17 @@ class ModelManager:
             logger.error(f"Error listing directory: {e}")
             return
 
+        # Auto-download if empty
+        if not entries:
+            logger.warning("No models found. Attempting to download default models...")
+            try:
+                from scripts.download_models import download_models
+                download_models()
+                # Re-scan after download
+                entries = os.listdir(self.models_dir)
+            except Exception as e:
+                logger.error(f"Failed to auto-download models: {e}")
+
         for folder_name in entries:
             folder_path = os.path.join(self.models_dir, folder_name)
             print(f"DEBUG: Checking entry: {folder_name}, path: {folder_path}, isdir: {os.path.isdir(folder_path)}")
@@ -128,6 +141,18 @@ class ModelManager:
             if not os.path.isdir(folder_path):
                 continue
             
+            # Check for Stable Diffusion model
+            if 'unet_lcm_512.rknn' in os.listdir(folder_path) or 'text_encoder.rknn' in os.listdir(folder_path):
+                print(f"DEBUG: Found Stable Diffusion model in {folder_name}")
+                self._model_cache[folder_name] = {
+                    'path': folder_path,
+                    'type': 'stable-diffusion',
+                    'filename': 'stable-diffusion',
+                    'context_size': 0
+                }
+                model_count += 1
+                continue
+
             # Find .rkllm files in this folder
             rkllm_files = [f for f in os.listdir(folder_path) if f.endswith('.rkllm')]
             print(f"DEBUG: Folder {folder_name} files: {rkllm_files}")
@@ -336,6 +361,38 @@ class ModelManager:
         """Get name of currently loaded model"""
         return self.current_model_name
     
+    async def get_stable_diffusion_model(self) -> Optional[StableDiffusionRKNN]:
+        """
+        Get or load the Stable Diffusion model.
+        Loads on demand if not already loaded.
+        """
+        with self._lock:
+            if self.sd_model and self.sd_model.is_loaded:
+                return self.sd_model
+            
+            # Check if SD model path exists
+            sd_path = settings.sd_model_path
+            if not os.path.exists(sd_path):
+                logger.warning(f"Stable Diffusion model path not found: {sd_path}")
+                return None
+                
+            # If an LLM is loaded, we might need to unload it to free up NPU/RAM
+            # For now, let's try to keep both if possible, or unload LLM if memory is tight.
+            # Given 5.6GB requirement for SD, it's safer to unload LLM on 8GB/16GB boards.
+            if self.current_model:
+                logger.info("Unloading LLM to free resources for Stable Diffusion...")
+                self.unload_model()
+            
+            try:
+                logger.info(f"Initializing Stable Diffusion from {sd_path}")
+                self.sd_model = StableDiffusionRKNN(sd_path)
+                self.sd_model.load()
+                return self.sd_model
+            except Exception as e:
+                logger.error(f"Failed to load Stable Diffusion: {e}")
+                self.sd_model = None
+                return None
+
     def load_model(
         self,
         model_name: str,
@@ -359,6 +416,12 @@ class ModelManager:
         """
         with self._lock:
             try:
+                # Unload SD model if loaded (to free resources for LLM)
+                if self.sd_model and self.sd_model.is_loaded:
+                    logger.info("Unloading Stable Diffusion to free resources for LLM...")
+                    self.sd_model.unload()
+                    self.sd_model = None
+
                 # Get model details (handles friendly names, filenames, etc.)
                 model_details = self.get_model_details(model_name)
                 if not model_details:
@@ -366,6 +429,24 @@ class ModelManager:
                 
                 model_path = model_details['path']
                 friendly_name = model_details['id']
+                
+                # Handle Stable Diffusion
+                if model_details.get('type') == 'stable-diffusion':
+                    logger.info(f"Loading Stable Diffusion model from {model_path}")
+                    
+                    # Unload LLM if loaded
+                    if self.current_model:
+                        logger.info(f"Unloading LLM '{self.current_model_name}' to load Stable Diffusion")
+                        self.unload_model()
+                    
+                    if self.sd_model and self.sd_model.is_loaded:
+                        logger.info("Stable Diffusion already loaded")
+                        return True
+                        
+                    self.sd_model = StableDiffusionRKNN(model_dir=model_path)
+                    self.sd_model.load()
+                    return True
+
                 detected_context = model_details['context_size']
                 
                 # Check if this model is already loaded
@@ -440,27 +521,42 @@ class ModelManager:
     
     def unload_model(self) -> bool:
         """
-        Unload currently loaded model
+        Unload currently loaded model (LLM or Stable Diffusion)
         
         Returns:
             True if successful, False if no model was loaded
         """
         with self._lock:
-            if self.current_model is None:
+            unloaded_something = False
+            
+            # Unload LLM
+            if self.current_model is not None:
+                try:
+                    logger.info(f"Unloading LLM: {self.current_model_name}")
+                    self.current_model.unload()
+                    self.current_model = None
+                    self.current_model_name = None
+                    logger.info("✅ LLM unloaded successfully")
+                    unloaded_something = True
+                except Exception as e:
+                    logger.error(f"Error unloading LLM: {e}", exc_info=True)
+            
+            # Unload Stable Diffusion
+            if self.sd_model is not None:
+                try:
+                    logger.info("Unloading Stable Diffusion model")
+                    self.sd_model.unload()
+                    self.sd_model = None
+                    logger.info("✅ Stable Diffusion unloaded successfully")
+                    unloaded_something = True
+                except Exception as e:
+                    logger.error(f"Error unloading Stable Diffusion: {e}", exc_info=True)
+
+            if not unloaded_something:
                 logger.warning("No model to unload")
                 return False
-            
-            try:
-                logger.info(f"Unloading model: {self.current_model_name}")
-                self.current_model.unload()
-                self.current_model = None
-                self.current_model_name = None
-                logger.info("✅ Model unloaded successfully")
-                return True
                 
-            except Exception as e:
-                logger.error(f"Error unloading model: {e}", exc_info=True)
-                return False
+            return True
     
     def get_current_model(self) -> Optional[RKLLMModel]:
         """
@@ -473,11 +569,21 @@ class ModelManager:
     
     def get_model_info(self) -> Optional[Dict[str, Any]]:
         """
-        Get information about currently loaded model
+        Get information about currently loaded model (LLM or Stable Diffusion)
         
         Returns:
             Dictionary with model info or None if no model loaded
         """
+        # Check for Stable Diffusion
+        if self.sd_model and self.sd_model.is_loaded:
+             return {
+                'name': 'stable-diffusion',
+                'path': self.sd_model.model_dir,
+                'loaded': True,
+                'type': 'stable-diffusion',
+                'context_size': 0
+            }
+
         if self.current_model is None or self.current_model_name is None:
             return None
         
@@ -488,6 +594,7 @@ class ModelManager:
             'name': self.current_model_name,  # Friendly name
             'path': self.current_model.model_path,
             'loaded': True,
+            'type': 'llm',
             'context_size': model_details['context_size'] if model_details else None,
             'filename': model_details['filename'] if model_details else None
         }

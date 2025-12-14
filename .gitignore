@@ -229,3 +229,4 @@ benchmarks/
 # Logs
 logs/
 *.log
+img_vec.bin

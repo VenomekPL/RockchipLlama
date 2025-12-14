@@ -14,11 +14,12 @@ class Settings(BaseSettings):
     # Server settings
     host: str = "0.0.0.0"
     port: int = 8021
-    log_level: str = "warning"
+    log_level: str = "debug"
     
     # Model settings
     models_dir: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
     default_model: str = "qwen3-0.6b"
+    sd_model_path: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "stable-diffusion-lcm")
     hf_home: str = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
     
     # RKLLM Runtime settings

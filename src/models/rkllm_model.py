@@ -6,6 +6,9 @@ import ctypes
 import os
 import logging
 import asyncio
+import subprocess
+import tempfile
+import numpy as np
 from typing import Optional, Callable, List
 from pathlib import Path
 import threading
@@ -84,10 +87,28 @@ class RKLLMTokenInput(ctypes.Structure):
         ("n_tokens", ctypes.c_size_t)
     ]
 
+class RKLLMEmbedInput(ctypes.Structure):
+    _fields_ = [
+        ("embed", ctypes.POINTER(ctypes.c_float)),
+        ("n_tokens", ctypes.c_size_t)
+    ]
+
+class RKLLMMultiModalInput(ctypes.Structure):
+    _fields_ = [
+        ("prompt", ctypes.c_char_p),
+        ("image_embed", ctypes.POINTER(ctypes.c_float)),
+        ("n_image_tokens", ctypes.c_size_t),
+        ("n_image", ctypes.c_size_t),
+        ("image_width", ctypes.c_size_t),
+        ("image_height", ctypes.c_size_t)
+    ]
+
 class RKLLMInputUnion(ctypes.Union):
     _fields_ = [
         ("prompt_input", ctypes.c_char_p),
+        ("embed_input", RKLLMEmbedInput),
         ("token_input", RKLLMTokenInput),
+        ("multimodal_input", RKLLMMultiModalInput)
     ]
 
 class RKLLMInput(ctypes.Structure):
@@ -208,6 +229,9 @@ class RKLLMModel:
     def _callback_impl(self, result, userdata, state):
         """Internal callback for RKLLM - called from C library"""
         try:
+            # Debug logging
+            logger.debug(f"Callback: state={state}, result='{result}'")
+
             # Check token limit
             if self.current_max_tokens > 0 and len(self.generated_text) >= self.current_max_tokens:
                 logger.info(f"🛑 Max tokens reached ({self.current_max_tokens}), stopping generation")
@@ -297,7 +321,13 @@ class RKLLMModel:
             
             # Model defaults - RESPECT passed max_context_len over config (already validated by model_manager)
             rkllm_param.max_context_len = max_context_len  # Use passed parameter (model-specific)
-            rkllm_param.max_new_tokens = model_defaults.get('max_new_tokens', 4096)
+            # Ensure max_new_tokens is large enough for the runtime limit
+            # We control the actual generation length via the callback
+            config_max_tokens = model_defaults.get('max_new_tokens', 4096)
+            if config_max_tokens <= 0:
+                config_max_tokens = 4096
+            rkllm_param.max_new_tokens = config_max_tokens
+            
             rkllm_param.skip_special_token = model_defaults.get('skip_special_token', True)
             rkllm_param.n_keep = model_defaults.get('n_keep', -1)
             
@@ -328,13 +358,33 @@ class RKLLMModel:
             rkllm_param.is_async = model_defaults.get('is_async', False)
             logger.info(f"  🔄 is_async mode: {rkllm_param.is_async}")
             
-            # Image parameters (empty for text-only)
-            rkllm_param.img_start = b""
-            rkllm_param.img_end = b""
-            rkllm_param.img_content = b""
+            # Image parameters
+            # Keep references to bytes to prevent GC
+            self._img_start_token = b"<|vision_start|>"
+            self._img_end_token = b"<|vision_end|>"
+            self._img_content_token = b"<|image_pad|>"
+            
+            model_path_lower = self.model_path.lower()
+            if 'qwen2-vl' in model_path_lower or 'vision' in model_path_lower:
+                rkllm_param.img_start = self._img_start_token
+                rkllm_param.img_end = self._img_end_token
+                rkllm_param.img_content = self._img_content_token
+                logger.info(f"  🖼️  Configured Qwen2-VL image tokens for {self.model_path}")
+            else:
+                rkllm_param.img_start = None
+                rkllm_param.img_end = None
+                rkllm_param.img_content = None
             
             # Extended parameters - ALL from config now!
-            rkllm_param.extend_param.base_domain_id = hw_params.get('base_domain_id', 0)
+            # Auto-detect base_domain_id for VL models if not explicitly set in config
+            base_domain_id = hw_params.get('base_domain_id', 0)
+            if 'vl' in self.model_path.lower() or 'vision' in self.model_path.lower():
+                logger.info(f"👁️  Detected Vision Language Model: {self.model_path}")
+                if base_domain_id == 0:
+                    base_domain_id = 1
+                    logger.info(f"  👉 Auto-switching base_domain_id to 1 for VL model")
+            
+            rkllm_param.extend_param.base_domain_id = base_domain_id
             rkllm_param.extend_param.embed_flash = hw_params.get('embed_flash', 1)
             n_batch = hw_params.get('n_batch', 3)
             rkllm_param.extend_param.n_batch = n_batch
@@ -486,6 +536,81 @@ class RKLLMModel:
             logger.error(f"Error setting chat template: {e}")
             raise
 
+    def _encode_image(self, image_data: bytes) -> Optional[np.ndarray]:
+        """
+        Encodes an image using the external imgenc binary.
+        Returns the embeddings as a numpy array of float32.
+        """
+        try:
+            # Find the vision model (.rknn) in the same directory as the LLM
+            model_dir = os.path.dirname(self.model_path)
+            vision_model_path = None
+            for f in os.listdir(model_dir):
+                if f.endswith(".rknn") and "vision" in f:
+                    vision_model_path = os.path.join(model_dir, f)
+                    break
+            
+            if not vision_model_path:
+                logger.error("❌ Vision model (.rknn) not found in model directory")
+                return None
+
+            # Find the imgenc binary
+            # Assuming it's in models/qwen2-vl-2b/demo_Linux_aarch64/imgenc
+            # We search recursively in the model directory for 'imgenc'
+            imgenc_path = None
+            for root, dirs, files in os.walk(model_dir):
+                if "imgenc" in files:
+                    imgenc_path = os.path.join(root, "imgenc")
+                    break
+            
+            if not imgenc_path:
+                # Fallback to known location if not found
+                imgenc_path = os.path.join(model_dir, "demo_Linux_aarch64", "imgenc")
+                if not os.path.exists(imgenc_path):
+                    logger.error("❌ imgenc binary not found")
+                    return None
+
+            # Ensure imgenc is executable
+            os.chmod(imgenc_path, 0o755)
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Save image to temp file
+                temp_image_path = os.path.join(temp_dir, "input.jpg")
+                with open(temp_image_path, "wb") as f:
+                    f.write(image_data)
+                
+                # Run imgenc
+                # Usage: ./imgenc <model_path> <image_path> <core_num>
+                # We use core_num=1 by default
+                cmd = [imgenc_path, vision_model_path, temp_image_path, "1"]
+                
+                logger.info(f"🖼️  Running image encoder: {' '.join(cmd)}")
+                result = subprocess.run(
+                    cmd, 
+                    cwd=temp_dir, # Run in temp dir so img_vec.bin is created there
+                    capture_output=True, 
+                    text=True
+                )
+                
+                if result.returncode != 0:
+                    logger.error(f"❌ imgenc failed: {result.stderr}")
+                    return None
+                
+                # Read output
+                output_path = os.path.join(temp_dir, "img_vec.bin")
+                if not os.path.exists(output_path):
+                    logger.error("❌ img_vec.bin not generated")
+                    return None
+                
+                # Read binary data as float32
+                embeddings = np.fromfile(output_path, dtype=np.float32)
+                logger.info(f"✅ Image encoded. Shape: {embeddings.shape}")
+                return embeddings
+
+        except Exception as e:
+            logger.error(f"❌ Error encoding image: {e}")
+            return None
+
     def generate(
         self,
         prompt: str,
@@ -494,10 +619,12 @@ class RKLLMModel:
         top_p: float = 0.9,
         top_k: int = 20,  # User preference
         repeat_penalty: float = 1.1,
+        enable_thinking: Optional[bool] = None,
         callback: Optional[Callable[[str], None]] = None,
         binary_cache_path: Optional[str] = None,
         save_binary_cache: bool = False,
-        stop: Optional[List[str]] = None
+        stop: Optional[List[str]] = None,
+        image_data: Optional[bytes] = None  # New parameter for image data
     ) -> tuple[str, Optional[dict]]:
         """
         Generate text completion using REAL NPU
@@ -509,10 +636,12 @@ class RKLLMModel:
             top_p: Nucleus sampling parameter
             top_k: Top-k sampling parameter (user set to 20)
             repeat_penalty: Repetition penalty
+            enable_thinking: Override thinking mode (True/False) or None for default
             callback: Optional streaming callback function
             binary_cache_path: Path to binary cache file (.rkllm_cache)
             save_binary_cache: If True, save NPU state to binary_cache_path after prefill
             stop: Optional list of stop sequences
+            image_data: Optional raw bytes of the image for multimodal inference
             
         Returns:
             (Generated text, performance stats dict)
@@ -558,7 +687,13 @@ class RKLLMModel:
             self.generated_text = []
             self.generation_state = None
             self.current_callback = callback
-            self.current_max_tokens = max_new_tokens
+            
+            # Ensure max_new_tokens is positive
+            if max_new_tokens <= 0:
+                self.current_max_tokens = 512
+                logger.info(f"⚠️  max_new_tokens was {max_new_tokens}, defaulting to 512")
+            else:
+                self.current_max_tokens = max_new_tokens
             
             # Set stop sequences (default to common ones if not provided)
             self.current_stop_sequences = stop if stop else ["<|im_end|>", "<|endoftext|>"]
@@ -567,18 +702,62 @@ class RKLLMModel:
             rkllm_input = RKLLMInput()
             rkllm_input.role = b"user"
             
-            # Enable thinking from config
+            # Handle Multimodal Input
+            if image_data:
+                logger.info("🖼️  Processing Multimodal Input (Image + Text)")
+                
+                image_embeds = self._encode_image(image_data)
+                
+                if image_embeds is not None:
+                    rkllm_input.input_type = RKLLMInputType.RKLLM_INPUT_MULTIMODAL
+                    
+                    # Keep references to prevent GC
+                    self._current_prompt_bytes = input_prompt.encode('utf-8')
+                    self._current_image_embeds = image_embeds # Keep numpy array alive
+                    
+                    # Setup Multimodal Input Struct
+                    mm_input = RKLLMMultiModalInput()
+                    mm_input.prompt = self._current_prompt_bytes
+                    mm_input.image_embed = self._current_image_embeds.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+                    
+                    # Assuming 1536 dim for Qwen2-VL-2B
+                    # The imgenc output was [196, 1536]
+                    mm_input.n_image_tokens = self._current_image_embeds.size // 1536
+                    mm_input.n_image = 1
+                    mm_input.image_width = 392
+                    mm_input.image_height = 392
+                    
+                    # IMPORTANT: Qwen2-VL requires specific image token count in context
+                    # The C++ demo uses rknn_app_ctx.model_image_token which is 196
+                    # We are hardcoding 196 here based on the model
+                    
+                    rkllm_input.input_data.multimodal_input = mm_input
+                    logger.info(f"✅ Multimodal input prepared: {mm_input.n_image_tokens} tokens")
+                    logger.info(f"📊 Image Embeddings: Shape={self._current_image_embeds.shape}, Mean={self._current_image_embeds.mean():.4f}, Std={self._current_image_embeds.std():.4f}")
+                    logger.info(f"📝 Prompt sent to RKLLM: {input_prompt!r}")
+                else:
+                    logger.warning("⚠️  Image encoding failed, falling back to text-only")
+                    rkllm_input.input_type = RKLLMInputType.RKLLM_INPUT_PROMPT
+                    self._current_prompt_bytes = input_prompt.encode('utf-8')
+                    rkllm_input.input_data.prompt_input = self._current_prompt_bytes
+            else:
+                rkllm_input.input_type = RKLLMInputType.RKLLM_INPUT_PROMPT
+                self._current_prompt_bytes = input_prompt.encode('utf-8')
+                rkllm_input.input_data.prompt_input = self._current_prompt_bytes
+            
+            # Handle Thinking Mode Override
             from config.settings import inference_config
-            enable_thinking = inference_config['model_defaults'].get('enable_thinking', False)
-            rkllm_input.enable_thinking = enable_thinking
-            if enable_thinking:
-                logger.info("🧠 Thinking mode ENABLED")
+            default_thinking = inference_config['model_defaults'].get('enable_thinking', False)
             
-            rkllm_input.input_type = RKLLMInputType.RKLLM_INPUT_PROMPT
-            
-            # Keep reference to bytes to prevent GC
-            self._current_prompt_bytes = input_prompt.encode('utf-8')
-            rkllm_input.input_data.prompt_input = self._current_prompt_bytes
+            if enable_thinking is not None:
+                # Override with request parameter
+                rkllm_input.enable_thinking = enable_thinking
+                logger.info(f"🧠 Thinking Mode Override: {enable_thinking}")
+            else:
+                # Use global config
+                rkllm_input.enable_thinking = default_thinking
+                if default_thinking:
+                    logger.info("🧠 Thinking mode ENABLED (Global Config)")
             
             # Create infer params
             infer_params = RKLLMInferParam()
@@ -683,10 +862,12 @@ class RKLLMModel:
         top_p: float = 0.9,
         top_k: int = 20,
         repeat_penalty: float = 1.1,
+        enable_thinking: Optional[bool] = None,
         callback: Optional[Callable[[str], None]] = None,
         binary_cache_path: Optional[str] = None,
         save_binary_cache: bool = False,
-        stop: Optional[List[str]] = None
+        stop: Optional[List[str]] = None,
+        image_data: Optional[bytes] = None  # New parameter for image data
     ) -> tuple[str, Optional[dict]]:
         """
         Async wrapper for generate() with batch slot queueing
@@ -721,10 +902,12 @@ class RKLLMModel:
                     top_p=top_p,
                     top_k=top_k,
                     repeat_penalty=repeat_penalty,
+                    enable_thinking=enable_thinking,
                     callback=callback,
                     binary_cache_path=binary_cache_path,
                     save_binary_cache=save_binary_cache,
-                    stop=stop
+                    stop=stop,
+                    image_data=image_data
                 )
             )
             return result

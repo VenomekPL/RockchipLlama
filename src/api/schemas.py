@@ -15,10 +15,23 @@ class MessageRole(str, Enum):
     tool = "tool"
 
 
+class ImageUrl(BaseModel):
+    """Image URL object"""
+    url: str
+    detail: Optional[str] = "auto"
+
+
+class ContentPart(BaseModel):
+    """Part of a multimodal message content"""
+    type: Literal["text", "image_url"]
+    text: Optional[str] = None
+    image_url: Optional[ImageUrl] = None
+
+
 class ChatMessage(BaseModel):
     """Single chat message"""
     role: MessageRole
-    content: str
+    content: Union[str, List[ContentPart]]
     name: Optional[str] = None
 
 
@@ -28,8 +41,9 @@ class ChatCompletionRequest(BaseModel):
     messages: List[ChatMessage] = Field(..., description="List of messages in the conversation")
     temperature: Optional[float] = Field(default=0.8, ge=0.0, le=2.0, description="Sampling temperature (RKLLM default: 0.8)")
     top_p: Optional[float] = Field(default=0.9, ge=0.0, le=1.0, description="Nucleus sampling parameter (RKLLM default: 0.9)")
+    enable_thinking: Optional[bool] = Field(default=None, description="Enable/disable Thinking Mode (overrides server config)")
     top_k: Optional[int] = Field(default=20, ge=1, description="Top-k sampling parameter (User preference: 20)")
-    max_tokens: Optional[int] = Field(default=512, ge=1, description="Maximum tokens to generate")
+    max_tokens: Optional[int] = Field(default=-1, description="Maximum tokens to generate (-1 for unbound/model limit)")
     stream: Optional[bool] = Field(default=False, description="Enable streaming responses")
     stop: Optional[Union[str, List[str]]] = Field(default=None, description="Stop sequences")
     presence_penalty: Optional[float] = Field(default=0.0, ge=-2.0, le=2.0, description="RKLLM presence_penalty (default: 0.0)")
