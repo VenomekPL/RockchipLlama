@@ -912,7 +912,7 @@ class RKLLMModel:
             )
             return result
     
-    async def get_embeddings(
+    def _get_embeddings_sync(
         self,
         text: str,
         inference_config: dict,
@@ -920,10 +920,10 @@ class RKLLMModel:
         normalize: bool = True
     ) -> tuple[list[float], dict]:
         """
-        Extract embeddings (hidden states) for the given text
+        Synchronous embedding extraction (called via thread pool from get_embeddings).
         
         Uses RKLLM_INFER_GET_LAST_HIDDEN_LAYER mode to get the final
-        layer's hidden states, then normalizes them to unit vectors.
+        layer's hidden states, then applies pooling and optional normalization.
         
         Args:
             text: Input text to embed
@@ -945,7 +945,7 @@ class RKLLMModel:
         logger.info(f"🔍 Generating embeddings for text: {text[:100]}...")
         start_time = time.time()
         
-        # Storage for hidden states
+        # Storage for hidden states (local to this call, not shared)
         hidden_states_result = {"all_states": None, "dim": 0, "num_tokens": 0}
         
         def embedding_callback(result_ptr, userdata, state):
@@ -982,7 +982,7 @@ class RKLLMModel:
             
             return 0
         
-        # Register callback
+        # Register callback with a unique key for this invocation
         callback_type = ctypes.CFUNCTYPE(
             ctypes.c_int,
             ctypes.POINTER(RKLLMResult),
@@ -990,8 +990,9 @@ class RKLLMModel:
             ctypes.c_int
         )
         callback_c = callback_type(embedding_callback)
+        cb_key = id(callback_c)
         with self._callback_lock:
-            self._callback_storage[id(self)] = callback_c
+            self._callback_storage[cb_key] = callback_c
         
         try:
             # Set up input
@@ -1009,7 +1010,6 @@ class RKLLMModel:
             infer_params.keep_history = 0  # Don't keep history for embeddings
             
             # ALWAYS use sync mode for embeddings (async can cause crashes with embedding models)
-            is_async_mode = False
             logger.debug("🔒 Using rkllm_run (sync) for embeddings")
             rkllm_run = self.lib.rkllm_run
             
@@ -1032,20 +1032,6 @@ class RKLLMModel:
             
             if ret != 0:
                 raise RuntimeError(f"rkllm_run failed with code {ret}")
-            
-            # Wait for async completion if needed
-            if is_async_mode:
-                rkllm_is_running = self.lib.rkllm_is_running
-                rkllm_is_running.argtypes = [RKLLM_Handle_t]
-                rkllm_is_running.restype = ctypes.c_int
-                
-                logger.info("⏳ Waiting for async embedding extraction...")
-                time.sleep(0.01)  # Initial delay
-                poll_count = 0
-                while rkllm_is_running(self.handle) == 1:
-                    time.sleep(0.001)
-                    poll_count += 1
-                logger.info(f"✅ Embedding extraction complete (polled {poll_count} times)")
             
             # Check if we got hidden states
             if hidden_states_result["all_states"] is None:
@@ -1093,6 +1079,50 @@ class RKLLMModel:
         except Exception as e:
             logger.error(f"Error generating embeddings: {e}")
             raise
+        finally:
+            with self._callback_lock:
+                self._callback_storage.pop(cb_key, None)
+    
+    async def get_embeddings(
+        self,
+        text: str,
+        inference_config: dict,
+        pooling_strategy: str = "last",
+        normalize: bool = True
+    ) -> tuple[list[float], dict]:
+        """
+        Async wrapper for _get_embeddings_sync() with batch slot queueing.
+        
+        Uses the same batch semaphore as generate_async() to prevent concurrent
+        embedding requests from interfering with each other or with generation.
+        The synchronous rkllm_run call is offloaded to a thread pool executor.
+        
+        Args:
+            text: Input text to embed
+            inference_config: Configuration dict (not heavily used for embeddings)
+            pooling_strategy: Pooling method - "mean", "cls", or "last" (default)
+            normalize: Whether to L2-normalize the embedding (default True)
+            
+        Returns:
+            (embedding_vector, stats_dict) where:
+                - embedding_vector is a list of floats (normalized)
+                - stats_dict contains tokens_processed, time_ms, embedding_dim
+        """
+        if self._batch_semaphore is None:
+            raise RuntimeError("Model not loaded. Call load() first to initialize batch semaphore.")
+        
+        async with self._batch_semaphore:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._get_embeddings_sync(
+                    text=text,
+                    inference_config=inference_config,
+                    pooling_strategy=pooling_strategy,
+                    normalize=normalize
+                )
+            )
+            return result
     
     def unload(self):
         """Unload model and free NPU resources
