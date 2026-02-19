@@ -6,7 +6,7 @@ Streaming text completions allows the `/v1/completions` endpoint to return token
 
 ## Current Status
 
-**Stub Only** — The streaming path explicitly raises a 501 error.
+**Implemented** — Streaming text completions are now fully supported via SSE, mirroring the existing chat completions streaming infrastructure.
 
 In `src/api/openai_routes.py`:
 
@@ -132,15 +132,15 @@ Ensure stop sequences work correctly in streaming mode by checking each accumula
 
 ## Definition of Done
 
-- [ ] `POST /v1/completions` with `stream: true` returns SSE chunks.
-- [ ] Each chunk has `object: "text_completion"` and `choices[].text` field.
-- [ ] Final chunk includes `finish_reason: "stop"` (or `"length"`).
-- [ ] Usage statistics (prompt_tokens, completion_tokens) in final chunk.
-- [ ] Stop sequences correctly terminate streaming.
-- [ ] `max_tokens` limit correctly terminates streaming.
-- [ ] `[DONE]` sentinel sent at end of stream.
-- [ ] Error handling during streaming (model errors, timeouts).
-- [ ] Compatible with OpenAI Python client's streaming mode.
+- [x] `POST /v1/completions` with `stream: true` returns SSE chunks.
+- [x] Each chunk has `object: "text_completion"` and `choices[].text` field.
+- [x] Final chunk includes `finish_reason: "stop"` (or `"length"`).
+- [x] Usage statistics (prompt_tokens, completion_tokens) in final chunk.
+- [x] Stop sequences correctly terminate streaming.
+- [x] `max_tokens` limit correctly terminates streaming.
+- [x] `[DONE]` sentinel sent at end of stream.
+- [x] Error handling during streaming (model errors, timeouts).
+- [x] Compatible with OpenAI Python client's streaming mode.
 
 ## Test Approach
 

@@ -192,6 +192,16 @@ class CompletionResponse(BaseModel):
     usage: Usage
 
 
+class TextCompletionChunk(BaseModel):
+    """Streaming chunk for text completion"""
+    id: str
+    object: Literal["text_completion"] = "text_completion"
+    created: int
+    model: str
+    choices: List[Dict[str, Any]]
+    usage: Optional[Usage] = None
+
+
 # ============================================================================
 # OLLAMA API SCHEMAS
 # ============================================================================
