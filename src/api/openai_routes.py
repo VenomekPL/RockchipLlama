@@ -624,10 +624,7 @@ async def stream_text_completion(
             _, perf_stats = await generation_task
         except asyncio.CancelledError:
             logger.warning("Streaming text completion cancelled; cancelling generation task")
-            try:
-                generation_task.cancel()
-            except NameError:
-                raise
+            generation_task.cancel()
             try:
                 await generation_task
             except asyncio.CancelledError:
