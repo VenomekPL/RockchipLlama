@@ -34,6 +34,11 @@
     "enabled_cpus_num": 4,
     "enabled_cpus_mask": 240
   },
+  "embedding_model": {
+    "max_context_len": 512,
+    "pooling_strategy": "last",
+    "normalize": true
+  },
   "notes": {
     "model_defaults": {
       "max_context_len": "Maximum context window size (tokens)",
@@ -61,6 +66,11 @@
       "use_cross_attn": "Enable cross-attention (0 = disabled, 1 = enabled for encoder-decoder models)",
       "enabled_cpus_num": "Number of CPU threads for inference",
       "enabled_cpus_mask": "CPU affinity mask (240 = 0xF0 = big cores 4-7 on RK3588)"
+    },
+    "embedding_model": {
+      "max_context_len": "Maximum context length for embedding extraction",
+      "pooling_strategy": "Pooling method: 'mean' (average all tokens), 'cls' (first token), 'last' (last token)",
+      "normalize": "L2-normalize embeddings to unit vectors (true recommended)"
     }
   }
 }

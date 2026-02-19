@@ -915,7 +915,9 @@ class RKLLMModel:
     async def get_embeddings(
         self,
         text: str,
-        inference_config: dict
+        inference_config: dict,
+        pooling_strategy: str = "last",
+        normalize: bool = True
     ) -> tuple[list[float], dict]:
         """
         Extract embeddings (hidden states) for the given text
@@ -926,6 +928,8 @@ class RKLLMModel:
         Args:
             text: Input text to embed
             inference_config: Configuration dict (not heavily used for embeddings)
+            pooling_strategy: Pooling method - "mean", "cls", or "last" (default)
+            normalize: Whether to L2-normalize the embedding (default True)
             
         Returns:
             (embedding_vector, stats_dict) where:
@@ -942,7 +946,7 @@ class RKLLMModel:
         start_time = time.time()
         
         # Storage for hidden states
-        hidden_states_result = {"data": None, "dim": 0, "num_tokens": 0}
+        hidden_states_result = {"all_states": None, "dim": 0, "num_tokens": 0}
         
         def embedding_callback(result_ptr, userdata, state):
             """Callback for embedding extraction"""
@@ -960,14 +964,13 @@ class RKLLMModel:
                     
                     logger.info(f"📊 Hidden layer: {num_tokens} tokens × {embd_size} dimensions")
                     
-                    # Copy the last token's hidden state (common for embeddings)
+                    # Copy all token hidden states for flexible pooling
                     # Total size is num_tokens * embd_size
-                    # We want the last token: offset = (num_tokens - 1) * embd_size
                     if num_tokens > 0:
-                        offset = (num_tokens - 1) * embd_size
-                        hidden_states_result["data"] = [
-                            result.last_hidden_layer.hidden_states[offset + i]
-                            for i in range(embd_size)
+                        total = num_tokens * embd_size
+                        hidden_states_result["all_states"] = [
+                            result.last_hidden_layer.hidden_states[i]
+                            for i in range(total)
                         ]
                         hidden_states_result["dim"] = embd_size
                         hidden_states_result["num_tokens"] = num_tokens
@@ -1045,14 +1048,35 @@ class RKLLMModel:
                 logger.info(f"✅ Embedding extraction complete (polled {poll_count} times)")
             
             # Check if we got hidden states
-            if hidden_states_result["data"] is None:
+            if hidden_states_result["all_states"] is None:
                 raise RuntimeError("Failed to extract hidden states")
             
-            # Normalize to unit vector (L2 normalization)
-            embedding = hidden_states_result["data"]
-            norm = math.sqrt(sum(x * x for x in embedding))
-            if norm > 0:
-                embedding = [x / norm for x in embedding]
+            # Apply pooling strategy
+            all_states = hidden_states_result["all_states"]
+            embd_size = hidden_states_result["dim"]
+            num_tokens = hidden_states_result["num_tokens"]
+            
+            if pooling_strategy == "mean":
+                # Average across all token positions
+                embedding = [0.0] * embd_size
+                for t in range(num_tokens):
+                    offset = t * embd_size
+                    for i in range(embd_size):
+                        embedding[i] += all_states[offset + i]
+                embedding = [x / num_tokens for x in embedding]
+            elif pooling_strategy == "cls":
+                # First token (CLS token)
+                embedding = all_states[:embd_size]
+            else:
+                # "last" (default) - last token
+                offset = (num_tokens - 1) * embd_size
+                embedding = all_states[offset:offset + embd_size]
+            
+            # L2-normalize to unit vector (configurable)
+            if normalize:
+                norm = math.sqrt(sum(x * x for x in embedding))
+                if norm > 0:
+                    embedding = [x / norm for x in embedding]
             
             elapsed_ms = (time.time() - start_time) * 1000
             
@@ -1062,7 +1086,7 @@ class RKLLMModel:
                 "embedding_dim": hidden_states_result["dim"]
             }
             
-            logger.info(f"✅ Generated {len(embedding)}-dim embedding in {elapsed_ms:.1f}ms")
+            logger.info(f"✅ Generated {len(embedding)}-dim embedding in {elapsed_ms:.1f}ms (pooling={pooling_strategy})")
             
             return embedding, stats
             

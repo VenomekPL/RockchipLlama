@@ -113,9 +113,11 @@ async def root():
         "endpoints": {
             "openai_chat": "/v1/chat/completions",
             "openai_models": "/v1/models",
+            "openai_embeddings": "/v1/embeddings",
             "ollama_generate": "/api/generate",
             "ollama_chat": "/api/chat",
             "ollama_tags": "/api/tags",
+            "ollama_embeddings": "/api/embeddings",
             "model_management": {
                 "load": "/v1/models/load",
                 "unload": "/v1/models/unload",
