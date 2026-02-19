@@ -28,6 +28,7 @@ from api.schemas import (
     CompletionRequest,
     CompletionResponse,
     CompletionChoice,
+    TextCompletionChunk,
     EmbeddingRequest,
     EmbeddingResponse
 )
@@ -486,9 +487,15 @@ async def create_completion(request: CompletionRequest):
         
         # Handle streaming response
         if request.stream:
-            raise HTTPException(
-                status_code=501,
-                detail="Streaming not yet implemented for text completions. Use stream=false or /v1/chat/completions for streaming."
+            return StreamingResponse(
+                stream_text_completion(
+                    request=request,
+                    completion_id=completion_id,
+                    created_time=created_time,
+                    binary_cache_path=binary_cache_path,
+                    current_model=current_model,
+                ),
+                media_type="text/event-stream"
             )
         
         # Non-streaming response
@@ -538,6 +545,128 @@ async def create_completion(request: CompletionRequest):
     except Exception as e:
         logger.error(f"Error in text completion: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def stream_text_completion(
+    request: CompletionRequest,
+    completion_id: str,
+    created_time: int,
+    binary_cache_path: Optional[str] = None,
+    current_model=None,
+) -> AsyncGenerator[str, None]:
+    """
+    Stream text completion tokens via SSE.
+
+    Yields SSE-formatted chunks with ``object: "text_completion"`` and
+    ``choices[].text`` fields, matching the OpenAI text completion streaming
+    specification.
+    """
+    try:
+        generated_text = ""
+        chunk_queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def streaming_callback(token: str):
+            """Callback for streaming tokens – puts chunks into queue"""
+            nonlocal generated_text
+            generated_text += token
+            chunk = TextCompletionChunk(
+                id=completion_id,
+                created=created_time,
+                model=request.model,
+                choices=[{
+                    "index": 0,
+                    "text": token,
+                    "logprobs": None,
+                    "finish_reason": None,
+                }],
+            )
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+
+        # Ensure model is available
+        if current_model is None:
+            try:
+                current_model = await ensure_model_loaded(preferred_model=request.model)
+            except HTTPException as e:
+                error_data = {"error": {"message": e.detail, "type": "model_loading_failed"}}
+                yield f"data: {json.dumps(error_data)}\n\n"
+                return
+
+        try:
+            # Start generation task
+            generation_task = asyncio.create_task(current_model.generate_async(
+                prompt=request.prompt,
+                max_new_tokens=request.max_tokens or 512,
+                temperature=request.temperature or 0.8,
+                top_p=request.top_p or 0.9,
+                top_k=request.top_k or 20,
+                repeat_penalty=request.repeat_penalty or 1.1,
+                callback=streaming_callback,
+                binary_cache_path=binary_cache_path,
+                save_binary_cache=False,
+                stop=request.stop if isinstance(request.stop, list) else [request.stop] if request.stop else None,
+            ))
+
+            # Consume queue while generation is running
+            while not generation_task.done():
+                try:
+                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.05)
+                    yield f"data: {chunk.model_dump_json()}\n\n"
+                except asyncio.TimeoutError:
+                    continue
+
+            # Flush remaining items in queue
+            while not chunk_queue.empty():
+                chunk = await chunk_queue.get()
+                yield f"data: {chunk.model_dump_json()}\n\n"
+
+            # Get result (raise exceptions if any and retrieve perf stats)
+            _, perf_stats = await generation_task
+        except asyncio.CancelledError:
+            logger.warning("Streaming text completion cancelled; cancelling generation task")
+            generation_task.cancel()
+            try:
+                await generation_task
+            except asyncio.CancelledError:
+                pass
+            raise
+
+        # Determine finish_reason: "length" if max_tokens was reached, else "stop"
+        max_tok = request.max_tokens or 512
+        finish_reason = "stop"
+        if perf_stats and perf_stats.get("generate_tokens", 0) >= max_tok:
+            finish_reason = "length"
+
+        # Build usage data
+        usage_data = {
+            "prompt_tokens": len(request.prompt.split()),
+            "completion_tokens": len(generated_text.split()),
+            "total_tokens": len(request.prompt.split()) + len(generated_text.split()),
+            "cache_hit": binary_cache_path is not None,
+            "cached_prompts": [request.use_cache] if binary_cache_path else None,
+        }
+
+        # Final chunk with finish_reason and usage
+        final_chunk = TextCompletionChunk(
+            id=completion_id,
+            created=created_time,
+            model=request.model,
+            choices=[{
+                "index": 0,
+                "text": "",
+                "logprobs": None,
+                "finish_reason": finish_reason,
+            }],
+            usage=usage_data,
+        )
+
+        yield f"data: {final_chunk.model_dump_json()}\n\n"
+        yield "data: [DONE]\n\n"
+
+    except Exception as e:
+        logger.error(f"Error in text completion streaming: {e}", exc_info=True)
+        error_data = {"error": {"message": str(e), "type": "internal_error"}}
+        yield f"data: {json.dumps(error_data)}\n\n"
 
 
 @router.get("/models", response_model=ModelListResponse)
