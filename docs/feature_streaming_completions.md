@@ -136,7 +136,7 @@ Ensure stop sequences work correctly in streaming mode by checking each accumula
 - [x] Each chunk has `object: "text_completion"` and `choices[].text` field.
 - [x] Final chunk includes `finish_reason: "stop"` (or `"length"`).
 - [x] Usage statistics (prompt_tokens, completion_tokens) in final chunk.
-- [x] Stop sequences correctly terminate streaming.
+- [ ] Stop sequences correctly terminate streaming. *(RKLLM stop-sequence early-stop is currently disabled in callback)*
 - [x] `max_tokens` limit correctly terminates streaming.
 - [x] `[DONE]` sentinel sent at end of stream.
 - [x] Error handling during streaming (model errors, timeouts).

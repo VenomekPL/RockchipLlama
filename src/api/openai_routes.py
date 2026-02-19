@@ -592,35 +592,53 @@ async def stream_text_completion(
                 yield f"data: {json.dumps(error_data)}\n\n"
                 return
 
-        # Start generation task
-        generation_task = asyncio.create_task(current_model.generate_async(
-            prompt=request.prompt,
-            max_new_tokens=request.max_tokens or 512,
-            temperature=request.temperature or 0.8,
-            top_p=request.top_p or 0.9,
-            top_k=request.top_k or 20,
-            repeat_penalty=request.repeat_penalty or 1.1,
-            callback=streaming_callback,
-            binary_cache_path=binary_cache_path,
-            save_binary_cache=False,
-            stop=request.stop if isinstance(request.stop, list) else [request.stop] if request.stop else None,
-        ))
+        try:
+            # Start generation task
+            generation_task = asyncio.create_task(current_model.generate_async(
+                prompt=request.prompt,
+                max_new_tokens=request.max_tokens or 512,
+                temperature=request.temperature or 0.8,
+                top_p=request.top_p or 0.9,
+                top_k=request.top_k or 20,
+                repeat_penalty=request.repeat_penalty or 1.1,
+                callback=streaming_callback,
+                binary_cache_path=binary_cache_path,
+                save_binary_cache=False,
+                stop=request.stop if isinstance(request.stop, list) else [request.stop] if request.stop else None,
+            ))
 
-        # Consume queue while generation is running
-        while not generation_task.done():
-            try:
-                chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.05)
+            # Consume queue while generation is running
+            while not generation_task.done():
+                try:
+                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.05)
+                    yield f"data: {chunk.model_dump_json()}\n\n"
+                except asyncio.TimeoutError:
+                    continue
+
+            # Flush remaining items in queue
+            while not chunk_queue.empty():
+                chunk = await chunk_queue.get()
                 yield f"data: {chunk.model_dump_json()}\n\n"
-            except asyncio.TimeoutError:
-                continue
 
-        # Flush remaining items in queue
-        while not chunk_queue.empty():
-            chunk = await chunk_queue.get()
-            yield f"data: {chunk.model_dump_json()}\n\n"
+            # Get result (raise exceptions if any and retrieve perf stats)
+            _, perf_stats = await generation_task
+        except asyncio.CancelledError:
+            logger.warning("Streaming text completion cancelled; cancelling generation task")
+            try:
+                generation_task.cancel()
+            except NameError:
+                raise
+            try:
+                await generation_task
+            except asyncio.CancelledError:
+                pass
+            raise
 
-        # Get result (raise exceptions if any and retrieve perf stats)
-        _, perf_stats = await generation_task
+        # Determine finish_reason: "length" if max_tokens was reached, else "stop"
+        max_tok = request.max_tokens or 512
+        finish_reason = "stop"
+        if perf_stats and perf_stats.get("generate_tokens", 0) >= max_tok:
+            finish_reason = "length"
 
         # Build usage data
         usage_data = {
@@ -631,15 +649,6 @@ async def stream_text_completion(
             "cached_prompts": [request.use_cache] if binary_cache_path else None,
         }
 
-        if perf_stats:
-            usage_data.update({
-                "prefill_time_ms": perf_stats.get("prefill_time_ms", 0),
-                "prefill_tokens": perf_stats.get("prefill_tokens", 0),
-                "generate_time_ms": perf_stats.get("generate_time_ms", 0),
-                "generate_tokens": perf_stats.get("generate_tokens", 0),
-                "memory_usage_mb": perf_stats.get("memory_usage_mb", 0),
-            })
-
         # Final chunk with finish_reason and usage
         final_chunk = TextCompletionChunk(
             id=completion_id,
@@ -649,7 +658,7 @@ async def stream_text_completion(
                 "index": 0,
                 "text": "",
                 "logprobs": None,
-                "finish_reason": "stop",
+                "finish_reason": finish_reason,
             }],
             usage=usage_data,
         )
